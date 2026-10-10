@@ -1,10 +1,12 @@
 import { useStore } from '../store'
+import Logo from './Logo'
 
 export default function TopBar() {
   const { theme, toggleTheme } = useStore()
   return (
-    <header className="flex h-12 shrink-0 items-center border-b border-line px-5">
-      <span className="text-[15px] font-semibold tracking-tight">Mission Control</span>
+    <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-line px-5">
+      <Logo size={32} />
+      <span className="text-xl font-semibold tracking-tight text-[#7a9a6e]">skeg</span>
       <button
         onClick={toggleTheme}
         title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}

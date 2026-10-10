@@ -1,4 +1,4 @@
-# Frontend Roadmap — Mission Control Dashboard
+# Frontend Roadmap - Skeg
 
 **Goal:** a dashboard that explains the demo with no narration. Two agents get conflicting tasks, the map flashes, and one agent adapts.
 
