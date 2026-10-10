@@ -16,7 +16,9 @@ packages:
 
 runcmd:
   - systemctl enable --now docker
-  # Lets the default user run docker without sudo, from the next login onward.
-  - usermod -aG docker ubuntu
-  # Where the deploy script drops the repo and .env.
-  - install -d -o ubuntu -g ubuntu /opt/coordinator
+  # Linode's Ubuntu images ship with no default non-root user — you log in as root.
+  # So no `usermod -aG docker ubuntu` here: that user does not exist and the command
+  # would fail. Creating one would mean putting its SSH key in user-data, which is
+  # readable back from the metadata service.
+  # Where the repo and .env go.
+  - install -d -m 0755 /opt/coordinator

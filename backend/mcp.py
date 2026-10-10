@@ -139,16 +139,41 @@ def should_run_coordinator(file: str) -> bool:
 
 
 def judge_edit(diff: str, spec_entry: sqlite3.Row, agent: str) -> None:
-    """Decide whether this edit breaks the contract `spec_entry` describes.
+    """Hand one edit to the coordinator, which decides whether it breaks the contract.
 
-    FROZEN SIGNATURE — Track C replaces this body in place and nothing else here changes.
-    In-process rather than a sibling service, so there is exactly one SQLite writer and no
-    cross-process lock contention.
+    The adapter between /events and backend/coordinator.py. In-process rather than a
+    sibling service, so there is exactly one SQLite writer and no cross-process lock
+    contention.
 
-    A real implementation logs a `type="alert"` row (which fetch_undelivered_alerts then
-    hands to each affected agent) or leaves the clean row below.
+    SQLite stores `consumers` and `shape` as JSON text, while run_coordinator expects
+    them parsed — it json.dumps() the shape and iterates consumers as a list. A raw
+    sqlite3.Row cannot be passed straight through: `consumers` would arrive as a string
+    and get iterated one character at a time.
     """
-    log_event(agent, "checked_clean", {"file": spec_entry["owner"]})
+    try:
+        # Imported lazily so the server still boots when the coordinator's dependencies
+        # or model configuration are absent. The tools and /events do not need it.
+        from backend.coordinator import run_coordinator
+
+        run_coordinator(
+            diff,
+            {
+                "contract": spec_entry["contract"],
+                "owner": spec_entry["owner"],
+                "consumers": json.loads(spec_entry["consumers"]),
+                "shape": json.loads(spec_entry["shape"]),
+            },
+        )
+    except Exception as exc:
+        # /events is an agent's only channel for pending alerts, so a missing API key, a
+        # rate limit or a model outage must not turn the hook into a 500. Reported to the
+        # container log rather than the events table: "checked_clean" would be a lie, and
+        # CONTRACT.md's frozen type enum has no value for "tried and could not judge".
+        print(
+            f"[coordinator] judge_edit failed on {spec_entry['owner']} "
+            f"(edited by {agent}): {exc!r}",
+            flush=True,
+        )
 
 
 def fetch_undelivered_alerts(agent: str) -> list[dict]:
