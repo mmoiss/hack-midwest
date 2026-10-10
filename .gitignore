@@ -12,3 +12,6 @@ __pycache__/
 
 # Bind-mounted volume holding the container's SQLite file (see compose.yaml).
 data/
+
+# Local MCP client config; holds personal tokens and server URLs.
+.mcp.json
