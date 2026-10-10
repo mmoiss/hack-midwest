@@ -1,0 +1,10 @@
+u@import "tailwindcss";
+
+html, body, #root { height: 100%; }
+body { color: #e4e4e7; font-family: ui-sans-serif, system-ui, sans-serif; }
+
+.react-flow__attribution { display: none; }
+.react-flow__handle { opacity: 0; }
+
+@keyframes flash { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
+.animate-flash { animation: flash .8s ease-in-out infinite; }
