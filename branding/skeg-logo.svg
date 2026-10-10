@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 372 116" role="img" aria-label="Skeg">
+  <g transform="translate(-20 -56)">
+    <circle cx="58" cy="72" r="8" fill="currentColor"/>
+    <path d="M49 104 V92 a9 9 0 0 1 18 0 V104 Z" fill="currentColor"/>
+    <circle cx="86" cy="72" r="8" fill="#7a9a6e"/>
+    <path d="M77 104 V92 a9 9 0 0 1 18 0 V104 Z" fill="#7a9a6e"/>
+    <circle cx="114" cy="72" r="8" fill="currentColor"/>
+    <path d="M105 104 V92 a9 9 0 0 1 18 0 V104 Z" fill="currentColor"/>
+    <circle cx="142" cy="72" r="8" fill="currentColor"/>
+    <path d="M133 104 V92 a9 9 0 0 1 18 0 V104 Z" fill="currentColor"/>
+    <path d="M24 108 H180 Q174 126 158 138 H52 Q38 132 30 120 Z" fill="currentColor"/>
+    <path d="M54 142 H74 L58 166 Z" fill="#7a9a6e"/>
+  </g>
+  <text x="184" y="82" fill="currentColor" font-family="'Space Grotesk', ui-sans-serif, system-ui, sans-serif" font-size="80" font-weight="600" letter-spacing="-1.6">skeg</text>
+</svg>

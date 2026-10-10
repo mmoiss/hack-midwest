@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="22 41 160 160">
+  <style>
+    .ink { fill: #18181b; }
+    @media (prefers-color-scheme: dark) { .ink { fill: #e4e4e7; } }
+  </style>
+  <circle class="ink" cx="58" cy="78" r="11"/>
+  <circle cx="86" cy="78" r="11" fill="#7a9a6e"/>
+  <circle class="ink" cx="114" cy="78" r="11"/>
+  <circle class="ink" cx="142" cy="78" r="11"/>
+  <path class="ink" d="M24 100 H180 Q174 126 158 140 H52 Q38 132 30 120 Z"/>
+  <path d="M52 142 H80 L60 174 Z" fill="#7a9a6e"/>
+</svg>
