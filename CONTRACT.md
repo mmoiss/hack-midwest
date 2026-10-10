@@ -97,13 +97,21 @@ CREATE TABLE events (
 
 The coordinator runs **in-process**, imported by the server, not as a sibling service. One SQLite writer, no cross-process lock contention, and strictly less to build. `/events` calls it only after the deterministic filter (does this file own a contract?) and a 5-second per-file debounce both pass, so routine edits never reach the team's shared quota.
 
-One frozen signature, which Track C fills in and nobody else touches:
+Two functions, one on each side of the seam:
 
 ```python
+# backend/mcp.py — the adapter /events calls
 def judge_edit(diff: str, spec_entry: sqlite3.Row, agent: str) -> None
+
+# backend/coordinator.py — the Strands agent
+def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False) -> None
 ```
 
-`spec_entry` is the full `spec` row the edited file owns — `contract`, `owner`, `consumers`, `shape` — already fetched, so the coordinator never queries for context. It returns nothing; it reports by writing an `events` row (`type = "alert"` via `raise_alert`, or `type = "checked_clean"`). A stub that logs `checked_clean` ships now, so `/events` is complete and testable before the real coordinator lands.
+`spec_entry` is the one `spec` row the edited file owns — `contract`, `owner`, `consumers`, `shape` — already fetched, so the coordinator never queries for context. `consumers` holds file paths, which `run_coordinator` resolves against `claims` into teammate names itself; the caller does not do that lookup.
+
+**`judge_edit` exists to convert, not to delegate.** SQLite stores `consumers` and `shape` as JSON *text*, and `run_coordinator` needs them parsed — it `json.dumps()` the shape and iterates consumers as a list. Passing a raw `sqlite3.Row` through would hand it a string where a list belongs.
+
+Neither function returns a verdict; both report by writing `events` rows (`type = "alert"` via `raise_alert`/`escalate_to_human`, else `type = "checked_clean"`). `judge_edit` swallows every exception from the coordinator and logs it to the container log: `/events` is an agent's only channel for pending alerts, so a missing key, a rate limit or a model outage must not turn the hook into a `500`.
 
 ## Running the server
 
