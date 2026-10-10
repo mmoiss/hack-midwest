@@ -65,7 +65,7 @@ We build one conflict type, contract drift, and make it work end to end on a tin
 
 ## Architecture
 
-One Python service and one React app, hosted on a single Akamai Linode VM. The AWS challenge names the Python SDK, and a single backend process is easy for four people to pick up.
+One Python service and one React app written in TypeScript, hosted on a single Akamai Linode VM. The Python service runs the MCP server, the hook endpoint, and the coordinator; the AWS challenge names the Python SDK. The React app's small TypeScript server serves the dashboard and reads the same SQLite file directly, so there is no separate dashboard API in between.
 
 &#91;embedded content: system architecture · 2 agents, 1 server, 1 dashboard\]
 
@@ -73,21 +73,20 @@ Agents on each laptop report edits through hooks. The server stores them, the co
 
 | Layer | Choice | Why |
 | --- | --- | --- |
-| Backend | FastAPI | One process serves the MCP endpoint, the hook endpoint, the dashboard API, and the live feed. |
-| MCP server | FastMCP from the official MCP Python SDK, over streamable HTTP | Each tool is a decorated function, and every teammate's agent connects by URL. |
+| MCP server | FastMCP from the official MCP Python SDK, running its own streamable HTTP server | Each tool is a decorated function, and every teammate's agent connects by URL. A FastMCP custom route serves the hook endpoint from the same process, with no web framework on top. |
 | Edit capture | PostToolUse hooks in each agent, with a `watchdog` script as fallback | Edits are reported whatever the agent decides to do, and alerts return on the same call. |
 | Coordinator | [Strands Agents](https://strandsagents.com/docs/user-guide/sdk/quickstart/overview/), Python SDK | The state functions (read spec, list claims, raise alert) become its tools. |
 | Model | Akamai hosted inference first, a stronger model if tool calling is flaky | The [Strands OpenAI provider](https://strandsagents.com/docs/user-guide/sdk/model-providers/openai/) takes a custom base URL. |
 | State | SQLite | One file, no setup. Three tables: spec entries, claims, events. Spec entry fields are below, under "The shared spec." |
-| Live updates | FastAPI WebSockets | The backend broadcasts every new event. Run a single worker so the broadcast reaches every client. |
-| Frontend | React, Vite, Tailwind, and React Flow for the map | React Flow gives animated nodes and edges cheaply, and the map is the demo. |
-| Hosting | One Linode VM with Caddy for HTTPS | Counts toward the Akamai challenge and gives the agents a public URL. |
+| Live updates | Server-Sent Events from the React app's TypeScript server | It polls the events table for rows past the last id it sent and pushes them to the browser. SQLite in WAL mode lets it read while Python writes. |
+| Frontend | React, Vite, Tailwind, and React Flow for the map, served by a small TypeScript Node server | The server reads SQLite directly for the dashboard's data and live feed. React Flow gives animated nodes and edges cheaply, and the map is the demo. |
+| Hosting | One Linode VM with Caddy for HTTPS | Caddy routes the MCP and hook paths to the Python service and everything else to the React app. Counts toward the Akamai challenge and gives the agents a public URL. |
 
 **The path of one edit:**
 
 1. An agent edits a file.
 2. Its hook posts the edit to the server: who, which file, and the diff.
-3. The server writes an event to SQLite and broadcasts it over the WebSocket.
+3. The server writes an event to SQLite, and the dashboard's TypeScript server picks it up and pushes it to the browser.
 4. A deterministic filter checks whether the file owns a contract in the spec.
 5. If it does, the coordinator judges whether the contract changed and who is affected.
 6. The dashboard shows the alert and the coordinator's reasoning.
@@ -234,7 +233,7 @@ The two risks most likely to sink the demo are the notification path and agent l
 | The server sits on the public internet with no auth. | Per-person bearer tokens, which also give identity. | Server |
 | Akamai account activation lags. | Sign up immediately. | Server |
 | Caddy needs a hostname to issue a certificate. | Settle the hostname with the stub deploy. | Server |
-| FastMCP mounted inside FastAPI fails on lifespan or path setup. | Prove it with the stub before building tools. | Server |
+| FastMCP's custom hook route or HTTP path setup misbehaves. | Prove it with the stub before building tools. | Server |
 | The codebase map eats the night. | Hand-placed nodes for the demo repo only. | Dashboard and demo |
 | Less than 24 hours: the deadline is 8:00 AM, not a full day after kickoff. | Feature freeze at 4:00 AM. | Everyone |
 
@@ -244,10 +243,10 @@ Four owners, one per layer, each starting with the spike that retires that layer
 
 | Role | Person | Owns | First-hour spike |
 | --- | --- | --- | --- |
-| Server |  | FastAPI, FastMCP tools, SQLite, WebSocket feed, Linode deploy, tokens | Stub MCP server live on a public URL |
+| Server |  | FastMCP tools and hook route, SQLite, Linode deploy, tokens | Stub MCP server live on a public URL |
 | Agent integration |  | Claude Code and Codex configs, hooks, instruction files, `watchdog` fallback, demo repo | Both agents connect, and a hook fires on an edit |
 | Coordinator |  | Strands agent, model provider, drift detection, spec schema, alerts | A Strands tool call working against `hackathon-chat` |
-| Dashboard and demo |  | React app, map, spec panel, alerts, pitch script | UI rendering from a fake event generator |
+| Dashboard and demo |  | React app and its TypeScript server (SQLite reads, live feed), map, spec panel, alerts, pitch script | UI rendering from a fake event generator |
 
 Freeze the event schema, the tool names, and the endpoints together before splitting up. The coordinator and dashboard owners then build against fixtures, so nobody waits on the server.
 
