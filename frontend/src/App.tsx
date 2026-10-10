@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { ReactFlowProvider } from '@xyflow/react'
-import { connectLive } from './ws'
-import { startMock } from './mock'
+import { connectLive } from './live'
+import { useStore } from './store'
 import TopBar from './components/TopBar'
 import AgentPanel from './components/AgentPanel'
 import CodebaseMap from './components/CodebaseMap'
@@ -9,22 +9,18 @@ import RightPanel from './components/RightPanel'
 import AlertBanner from './components/AlertBanner'
 
 export default function App() {
-  // Placeholder data plays until the backend connects, then it is cleared.
+  const theme = useStore((s) => s.theme)
+  useEffect(connectLive, [])
   useEffect(() => {
-    const stopMock = startMock()
-    const stopLive = connectLive(undefined, stopMock)
-    return () => {
-      stopMock()
-      stopLive()
-    }
-  }, [])
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+  }, [theme])
 
   return (
     <div className="flex h-full flex-col">
       <TopBar />
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 divide-x divide-line">
         <AgentPanel />
-        <main className="relative min-w-0 flex-1">
+        <main className="relative min-w-0 flex-1 overflow-hidden">
           <ReactFlowProvider>
             <CodebaseMap />
           </ReactFlowProvider>

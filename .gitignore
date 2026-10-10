@@ -1,14 +1,9 @@
-# Secrets. This is the one rule here that lands before the file does, on purpose:
-# committing .env even once means rotating every teammate's token.
-# (It does not match .env.example — different filename, so the template stays tracked.)
+__pycache__/
+*.pyc
+*.db
+*.db-shm
+*.db-wal
 .env
 
-# Written by running the server.
-__pycache__/
-
-# Local SQLite database. WAL mode creates -wal and -shm siblings next to it while a
-# connection is open, which a plain "coordinator.db" rule would miss.
-coordinator.db*
-
-# Where the container's bind-mounted database lives.
+# Bind-mounted volume holding the container's SQLite file (see compose.yaml).
 data/

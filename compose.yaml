@@ -6,6 +6,14 @@ services:
       # that rejects every token or a Caddy with no hostname to secure.
       TEAM_TOKENS: ${TEAM_TOKENS:?missing TEAM_TOKENS — copy .env.example to .env}
       DB_PATH: /app/data/coordinator.db
+      # backend/coordinator.py reads its OWN env var and defaults to ./coordinator.db.
+      # Left unset it would write alerts to /app/coordinator.db while the server reads
+      # /app/data/coordinator.db — every alert would land in a file nothing queries.
+      COORDINATOR_DB_PATH: /app/data/coordinator.db
+      # Model selection for the coordinator. Only read once it is wired into /events.
+      COORDINATOR_MODEL_PROVIDER: ${COORDINATOR_MODEL_PROVIDER:-akamai}
+      AKAMAI_TEAM_KEY: ${AKAMAI_TEAM_KEY:-}
+      AKAMAI_BASE_URL: ${AKAMAI_BASE_URL:-https://ws.akamai-workshops.com/v1}
     volumes:
       # Bind mount, so the database survives `docker compose down` and a rebuild.
       - ./data:/app/data

@@ -1,1 +1,2 @@
 fastmcp
+strands-agents[openai,anthropic,ollama]

@@ -307,6 +307,14 @@ async def handle_health(request: Request) -> JSONResponse:
     except sqlite3.Error:
         pass
 
+    # backend/coordinator.py selects its provider from this and reads that provider's key.
+    provider = os.environ.get("COORDINATOR_MODEL_PROVIDER", "akamai")
+    key_var = {
+        "akamai": "AKAMAI_TEAM_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+    }.get(provider)
+
     return JSONResponse(
         {
             "status": "ok" if db_ok else "degraded",
@@ -316,8 +324,11 @@ async def handle_health(request: Request) -> JSONResponse:
                 "journal_mode": journal_mode,
                 "events": event_count,
             },
-            # Track C owns the actual call; this only reports whether it is wired up.
-            "inference": {"configured": bool(os.environ.get("OPENAI_BASE_URL"))},
+            "inference": {
+                "provider": provider,
+                # ollama takes no key, so no key_var means there is nothing to configure.
+                "configured": key_var is None or bool(os.environ.get(key_var)),
+            },
             "tokens_loaded": len(TEAM_TOKENS),
         },
         status_code=200 if db_ok else 503,

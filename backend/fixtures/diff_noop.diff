@@ -1,0 +1,10 @@
+--- a/backend/api/users.py
++++ b/backend/api/users.py
+@@ -5,9 +5,10 @@ def get_user(user_id: int):
+-    user = User.query.get(user_id)
++    user = User.query.get_or_404(user_id)
+     return jsonify({
+         "id": user.id,
+         "name": user.name,
+         "email": user.email,
+     })
