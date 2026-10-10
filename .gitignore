@@ -4,3 +4,6 @@ __pycache__/
 *.db-shm
 *.db-wal
 .env
+
+# Bind-mounted volume holding the container's SQLite file (see compose.yaml).
+data/

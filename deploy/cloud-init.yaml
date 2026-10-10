@@ -1,0 +1,22 @@
+#cloud-config
+# Bootstraps the Linode with Docker and nothing else. Equivalent to the Akamai workshop's
+# deploy/cloud-init.yaml; if you want byte-for-byte parity, diff it against the copy in
+# akamai-developers/akamai-workshop-hackmidwest.
+#
+# NEVER put secrets in here. cloud-init user-data is readable back from the Linode
+# metadata service and from the Cloud Manager UI. Tokens and keys go in .env, copied
+# over SSH after the machine is up.
+
+package_update: true
+package_upgrade: false
+
+packages:
+  - docker.io
+  - docker-compose-v2
+
+runcmd:
+  - systemctl enable --now docker
+  # Lets the default user run docker without sudo, from the next login onward.
+  - usermod -aG docker ubuntu
+  # Where the deploy script drops the repo and .env.
+  - install -d -o ubuntu -g ubuntu /opt/coordinator

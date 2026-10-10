@@ -1,0 +1,33 @@
+# Everything here is sent to the Docker daemon as build context before the first
+# COPY runs, so excluding the heavy directories is what keeps `docker compose build`
+# from taking minutes. backend/venv alone is hundreds of megabytes of packages the
+# image reinstalls from requirements.txt anyway.
+backend/venv/
+.venv/
+venv/
+
+# Secrets must never land in an image layer.
+.env
+.env.*
+!.env.example
+
+.git/
+.gitignore
+
+# Not used by the app image. The dashboard is its own service (Track D).
+frontend/
+scripts/
+deploy/
+*.md
+
+# Runtime state belongs on the mounted volume, not baked into the image.
+data/
+*.db
+*.db-wal
+*.db-shm
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
