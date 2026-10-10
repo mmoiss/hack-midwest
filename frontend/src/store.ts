@@ -88,8 +88,12 @@ const fix = {
 
 function reduce(s: State, { type, data = {}, ts = Date.now() }: Msg): Partial<State> {
   if (type === 'snapshot') {
+    const current: Record<string, string> = {}
+    for (const e of (data.events ?? []) as FeedEvent[]) {
+      if (e.type === 'file.touch' && !(e.data.agentId in current)) current[e.data.agentId] = e.data.path
+    }
     return {
-      agents: Object.fromEntries(((data.agents ?? []) as Agent[]).map((a) => [a.id, a])),
+      agents: Object.fromEntries(((data.agents ?? []) as Agent[]).map((a) => [a.id, { currentFile: current[a.id], ...a }])),
       files: (data.files ?? []).map(fix.file),
       claims: data.claims ?? [],
       proposals: (data.proposals ?? []).map(fix.proposal),
@@ -178,3 +182,14 @@ export const useStore = create<State>()((set) => ({
 // Derived helpers
 export const openAlerts = (s: State) => s.alerts.filter((a) => a.status === 'open')
 export const pendingProposals = (s: State) => s.proposals.filter((p) => p.status === 'pending')
+
+export function alertTargets(s: Pick<State, 'agents' | 'files' | 'claims'>, a: Alert) {
+  const named = [...a.agents, ...a.files]
+  const agents = new Set(named.filter((x) => x in s.agents))
+  const files = new Set(named.filter((x) => s.files.some((f) => f.path === x)))
+  for (const c of s.claims) {
+    if (agents.has(c.agentId)) files.add(c.path)
+    else if (files.has(c.path)) agents.add(c.agentId)
+  }
+  return { agents: [...agents], files: [...files] }
+}
