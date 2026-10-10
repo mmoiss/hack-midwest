@@ -1,0 +1,3 @@
+[
+    {"agent": "bob", "file": "frontend/src/components/UserCard.tsx", "summary": "Render user name in card"}
+]
