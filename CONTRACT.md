@@ -33,7 +33,11 @@ Authorization: Bearer <token>
 → 200 { "alerts": [ { "summary": str, "affected": [str], "suggested_fix": str } ] }
 ```
 
-Every alert returned is marked delivered. This is the only channel that gets information back into a running agent — there is no server-to-agent push.
+Every alert returned is marked delivered **to that agent**. This is the only channel that gets information back into a running agent — there is no server-to-agent push.
+
+The `agent` field in the body is accepted and ignored. Identity comes from the bearer token, exactly as it does for the tools, so a hook cannot report an edit as somebody else. Hook scripts may keep sending it; nothing reads it.
+
+Malformed input is rejected before anything is logged: unknown or missing token → `401`, a body that is not JSON or has no `file` → `400`.
 
 ## Shared state (SQLite, one file)
 
@@ -59,9 +63,12 @@ CREATE TABLE events (
     agent   TEXT NOT NULL,
     type    TEXT NOT NULL,        -- "edit" | "declare_intent" | "check_conflicts" | "get_spec" |
                                    -- "propose_spec_change" | "alert" | "checked_clean"
-    payload TEXT NOT NULL         -- JSON, shape depends on type
+    payload TEXT NOT NULL,        -- JSON, shape depends on type
+    delivered_to TEXT NOT NULL DEFAULT '[]'  -- JSON list of agent names already handed this row
 );
 ```
+
+`delivered_to` only means anything on `type = "alert"` rows, and it is tracked **per agent, not as one boolean**. `affected` is a list, so a single `delivered` flag would let the first agent to call `/events` consume an alert on behalf of everyone else named in it — and `/events` is the only channel back into a running agent, so that alert would simply be lost. Dashboard queries can ignore this column; `init_db()` adds it to databases that predate it.
 
 `spec` is hand-written once at setup for the demo repo. `claims` and `events` fill up live. The coordinator's `raise_alert` and `escalate_to_human` write `events` rows with `type = "alert"`; everything else — MCP tools and the hook — writes the row types listed above. Nothing lives outside these three tables; there is no second store to fall out of sync.
 
@@ -78,13 +85,35 @@ CREATE TABLE events (
 |---|---|---|
 | Compute | One Linode VM, Shared CPU (`g6-standard-1`), Ubuntu | Matches the Akamai workshop starter's own default; one service doesn't need a cluster. |
 | Bootstrap | `cloud-init`: installs `docker.io` + `docker-compose-v2`, nothing else | Copied from the workshop's `deploy/cloud-init.yaml` — no secrets in cloud-init, ever. |
-| Process layout | `docker compose`: `app` (bare FastMCP server, its own HTTP transport, SQLite) + `dashboard` (the React app's TypeScript server) + `caddy` (TLS) | No FastAPI, no WebSocket worker constraint — FastMCP serves its own tool endpoints and the `/events` custom route directly. |
+| Process layout | `docker compose`: `app` (bare FastMCP server, its own HTTP transport, SQLite) + `dashboard` (the React app's TypeScript server) + `caddy` (TLS) | No FastAPI, no WebSocket worker constraint — FastMCP serves its own tool endpoints and the `/events` custom route directly. **`dashboard` is not in `compose.yaml` yet** — Track D adds its service and uncomments the routing block in the `Caddyfile` when it hands off. |
 | Networking | Cloud Firewall open on `80`, `443`, `22` only; Caddy routes MCP/hook paths to `app` and everything else to `dashboard` | The workshop's own demo opens its app port unauthenticated to the internet; ours carries bearer tokens, so it sits behind Caddy, not raw. |
 | Inference | `OPENAI_BASE_URL=https://ws.akamai-workshops.com/v1`, model alias `hackathon-chat`, team key as bearer token, kept in `.env` on the VM only | Only the coordinator calls this. The four MCP tools above are plain Python — no model involved. |
 | Rate limits | 60 requests/min and 100,000 chat tokens/min, shared across the whole team | The deterministic filter (does this file own a contract?) and debounce run *before* any model call, so routine edits never touch the quota. |
 | State | SQLite file on a bind-mounted volume, WAL mode on | No managed Postgres, no Object Storage, no Valkey — all three exist in the workshop stack for document RAG, which this project doesn't do. WAL mode is what lets the dashboard's Node server read while Python writes. |
 | Deploy mechanics | Adapt `scripts/deploy_linode.sh`: create/reuse VM + firewall by label, wait for SSH + cloud-init, copy code + `.env` over SSH, `docker compose up --build`, poll `/health` | Already written and working in the reference repo — retarget it, don't rewrite it. |
 | Health check | `GET /health` reporting inference connectivity + DB status | Same pattern as the workshop's `agent/server.py` — built to be opened live in front of judges. |
+
+## Coordinator boundary
+
+The coordinator runs **in-process**, imported by the server, not as a sibling service. One SQLite writer, no cross-process lock contention, and strictly less to build. `/events` calls it only after the deterministic filter (does this file own a contract?) and a 5-second per-file debounce both pass, so routine edits never reach the team's shared quota.
+
+One frozen signature, which Track C fills in and nobody else touches:
+
+```python
+def judge_edit(diff: str, spec_entry: sqlite3.Row, agent: str) -> None
+```
+
+`spec_entry` is the full `spec` row the edited file owns — `contract`, `owner`, `consumers`, `shape` — already fetched, so the coordinator never queries for context. It returns nothing; it reports by writing an `events` row (`type = "alert"` via `raise_alert`, or `type = "checked_clean"`). A stub that logs `checked_clean` ships now, so `/events` is complete and testable before the real coordinator lands.
+
+## Running the server
+
+From the **repo root**, as a module:
+
+```
+python -m backend.mcp
+```
+
+Not `python backend/mcp.py`. The script form puts `backend/` at the front of `sys.path`, where `backend/mcp.py` shadows the installed `mcp` package that `fastmcp` imports internally, and startup dies with `No module named 'mcp.server'; 'mcp' is not a package`. The `Dockerfile` `CMD` uses the `-m` form for the same reason.
 
 ## Build order
 
