@@ -1,12 +1,18 @@
 ﻿"""Reset coordinator.db to the demo's starting state: fake agents, claims, and events.
 
 Run from backend/: python seed.py
+
+In the container the database lives on a mounted volume, so DB_PATH is set there and
+must be honoured here too. Hardcoding the relative name seeded /app/coordinator.db
+while the server kept reading /app/data/coordinator.db — the seed appeared to succeed
+and the spec table stayed empty, so no edit ever reached the coordinator.
 """
 
 import json
+import os
 import sqlite3
 
-DB_PATH = "coordinator.db"
+DB_PATH = os.environ.get("DB_PATH", "coordinator.db")
 
 # Same schema as mcp.py's init_db (not imported, so seeding doesn't need fastmcp).
 SCHEMA = """
