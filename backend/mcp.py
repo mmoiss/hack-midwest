@@ -19,7 +19,6 @@ from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from backend.alert_context import enrich_alert, reviewing
 
 mcp = FastMCP("TeamAgentCoordinator")
 
@@ -114,18 +113,14 @@ def caller_identity() -> tuple[str, str]:
     return resolve_identity(_bearer(headers.get("authorization", "")))
 
 
-def log_event(agent: str, event_type: str, payload: dict) -> int:
+def log_event(agent: str, event_type: str, payload: dict) -> None:
     conn = get_db()
-    if event_type == "alert":
-        payload = enrich_alert(payload)
-    cursor = conn.execute(
+    conn.execute(
         "INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)",
         (agent, event_type, json.dumps(payload)),
     )
     conn.commit()
-    event_id = cursor.lastrowid
     conn.close()
-    return event_id
 
 
 def should_run_coordinator(file: str) -> bool:
@@ -284,7 +279,7 @@ async def handle_events(request: Request) -> JSONResponse:
 
     # The hook also sends an "agent" field; it is ignored on purpose. The token decides who
     # you are, so an agent cannot report an edit as someone else.
-    edit_id = log_event(agent, "edit", {"file": file, "diff": diff})
+    log_event(agent, "edit", {"file": file, "diff": diff})
 
     conn = get_db()
     owner_row = conn.execute("SELECT * FROM spec WHERE owner = ?", (file,)).fetchone()
@@ -292,8 +287,7 @@ async def handle_events(request: Request) -> JSONResponse:
 
     # The deterministic filter: only a file that owns a contract is worth a model call.
     if owner_row is not None and should_run_coordinator(file):
-        with reviewing(owner_row, edit_id):
-            judge_edit(diff, owner_row, agent)
+        judge_edit(diff, owner_row, agent)
 
     return JSONResponse({"alerts": fetch_undelivered_alerts(agent)})
 

@@ -77,7 +77,7 @@ function Diff({ before = '', after = '' }) {
 }
 
 export function Alerts({ limit, agentId, openOnly = false }: Filter & { openOnly?: boolean }) {
-  const { alerts, agents, resolveAlert, selectFile, setPage, focusAlert } = useStore()
+  const { alerts, agents, resolveAlert, selectFile, setPage } = useStore()
   const list = [...alerts]
     .sort((a, b) => (a.status === 'open' ? -1 : 1) - (b.status === 'open' ? -1 : 1))
     .filter((a) => (!openOnly || a.status === 'open') && (!agentId || a.agents.includes(agentId)))
@@ -90,12 +90,11 @@ export function Alerts({ limit, agentId, openOnly = false }: Filter & { openOnly
         return (
           <li key={al.id} className={`px-4 py-3 ${done ? 'opacity-50' : ''}`}>
             <div className="flex items-center gap-2 text-xs">
-              <span className="font-semibold">{al.type === 'decision' ? 'Human decision' : al.type === 'collision' ? 'Collision' : 'Contract drift'}</span>
-              {al.severity && <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-muted">{al.severity}</span>}
+              <span className="font-semibold">{al.type === 'collision' ? 'Collision' : 'Context drift'}</span>
+              <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-muted">{al.severity}</span>
               <span className="ml-auto text-faint">{new Date(al.ts).toLocaleTimeString()}</span>
             </div>
             <p className="mt-1.5 text-sm">{al.message}</p>
-            {al.contract && <p className="mt-1 font-mono text-xs text-muted">{al.contract}</p>}
             {al.suggestion && <p className="mt-1 text-xs text-muted">{al.suggestion}</p>}
             <div className="mt-2 flex flex-wrap gap-1">
               {al.agents.map((id) => (
@@ -114,7 +113,6 @@ export function Alerts({ limit, agentId, openOnly = false }: Filter & { openOnly
                 </button>
               ))}
             </div>
-            <button onClick={() => focusAlert(al.id)} className="mt-2 mr-4 text-xs font-medium hover:underline">Show on map</button>
             {!done && (
               <button onClick={() => resolveAlert(al.id)} className="mt-2 text-xs text-muted hover:text-fg">
                 Mark resolved

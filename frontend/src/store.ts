@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { alertFiles, withAlertFiles } from './alertGraph.ts'
 
 /*
  * Event contract (server.ts -> dashboard over SSE). Every message is
@@ -13,7 +12,7 @@ import { alertFiles, withAlertFiles } from './alertGraph.ts'
  * claim.release    { agentId, path }
  * proposal.add     { id, agentId, title, target, rationale, before, after, status, affects[] }
  * proposal.update  { id, status }                     // pending | accepted | rejected
- * alert.add        { id, type, severity, agents[], files[], message, suggestion, contract?, owner?, consumers[], editId? }
+ * alert.add        { id, type, severity, agents[], files[], message, suggestion }
  * alert.resolve    { id }
  */
 
@@ -30,7 +29,6 @@ export type AlertType = 'collision' | 'drift' | string
 export type Alert = {
   id: string; type: AlertType; severity: string; agents: string[]; files: string[]
   message: string; suggestion?: string; status: 'open' | 'resolved'; ts: number
-  contract?: string; owner?: string; consumers?: string[]; editId?: string
 }
 export type FeedEvent = { id: string; type: string; data: any; ts: number }
 export type Msg = { type: string; data?: any; ts?: number }
@@ -58,9 +56,6 @@ export type State = Data & {
   selectedAgent: string | null
   selectedProposal: string | null
   selectedFile: string | null
-  selectedAlert: string | null
-  mapFocusVersion: number
-  focusAlert: (id: string) => void
   hoveredAgent: string | null
   toggleTheme: () => void
   apply: (msg: Msg) => void
@@ -97,14 +92,12 @@ function reduce(s: State, { type, data = {}, ts = Date.now() }: Msg): Partial<St
     for (const e of (data.events ?? []) as FeedEvent[]) {
       if (e.type === 'file.touch' && !(e.data.agentId in current)) current[e.data.agentId] = e.data.path
     }
-    const alerts: Alert[] = (data.alerts ?? []).map(fix.alert)
     return {
       agents: Object.fromEntries(((data.agents ?? []) as Agent[]).map((a) => [a.id, { currentFile: current[a.id], ...a }])),
-      files: withAlertFiles((data.files ?? []).map(fix.file), alerts),
+      files: (data.files ?? []).map(fix.file),
       claims: data.claims ?? [],
       proposals: (data.proposals ?? []).map(fix.proposal),
-      alerts,
-      selectedAlert: alerts.some((a) => a.id === s.selectedAlert) ? s.selectedAlert : alerts.find((a) => a.status === 'open')?.id ?? null,
+      alerts: (data.alerts ?? []).map(fix.alert),
       events: data.events ?? [],
     }
   }
@@ -133,12 +126,8 @@ function reduce(s: State, { type, data = {}, ts = Date.now() }: Msg): Partial<St
       next.proposals = s.proposals.map((p) => (p.id === data.id ? { ...p, ...data } : p))
       break
     case 'alert.add':
-      next.alerts = [{ ...fix.alert(data), ts }, ...s.alerts.filter((a) => a.id !== data.id)]
+      next.alerts = [{ ...fix.alert(data), ts }, ...s.alerts]
       next.lastAlert = { ...fix.alert(data), ts }
-      next.files = withAlertFiles(s.files, [next.lastAlert])
-      next.selectedAlert = data.id
-      next.selectedFile = null
-      next.mapFocusVersion = s.mapFocusVersion + 1
       break
     case 'alert.resolve':
       next.alerts = s.alerts.map((a) => (a.id === data.id ? { ...a, status: 'resolved' } : a))
@@ -175,9 +164,6 @@ export const useStore = create<State>()((set) => ({
   selectedAgent: null,
   selectedProposal: null,
   selectedFile: null,
-  selectedAlert: null,
-  mapFocusVersion: 0,
-  focusAlert: (id) => set((s) => ({ page: 'map', selectedAlert: id, selectedFile: null, mapFocusVersion: s.mapFocusVersion + 1 })),
   hoveredAgent: null,
 
   apply: (msg) => set((s) => reduce(s, msg)),
@@ -185,7 +171,7 @@ export const useStore = create<State>()((set) => ({
   setPage: (page) => set({ page }),
   openAgent: (selectedAgent) => set({ page: 'agent', selectedAgent }),
   selectProposal: (id) => set((s) => ({ selectedProposal: s.selectedProposal === id ? null : id })),
-  selectFile: (path) => set((s) => ({ selectedFile: path, selectedAlert: null, mapFocusVersion: s.mapFocusVersion + 1 })),
+  selectFile: (path) => set({ selectedFile: path }),
   hoverAgent: (id) => set({ hoveredAgent: id }),
 
   // ponytail: not wired yet. Needs a Python route (the only SQLite writer) that logs the decision as an event.
@@ -200,12 +186,10 @@ export const pendingProposals = (s: State) => s.proposals.filter((p) => p.status
 export function alertTargets(s: Pick<State, 'agents' | 'files' | 'claims'>, a: Alert) {
   const named = [...a.agents, ...a.files]
   const agents = new Set(named.filter((x) => x in s.agents))
-  const files = new Set(alertFiles(a))
-  // Legacy alerts may carry a consumer path in affected. Do not expand an agent
-  // into every file they claimed: that invents unrelated contract breaks.
-  for (const name of named) if (s.files.some((f) => f.path === name)) files.add(name)
+  const files = new Set(named.filter((x) => s.files.some((f) => f.path === x)))
   for (const c of s.claims) {
-    if (files.has(c.path)) agents.add(c.agentId)
+    if (agents.has(c.agentId)) files.add(c.path)
+    else if (files.has(c.path)) agents.add(c.agentId)
   }
   return { agents: [...agents], files: [...files] }
 }

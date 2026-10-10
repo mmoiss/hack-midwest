@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { ReactFlow, Background, Controls, MiniMap, Panel, Handle, Position, useNodesState, useNodesInitialized, useReactFlow, type Node, type Edge, type NodeProps } from '@xyflow/react'
+import { useEffect, useMemo } from 'react'
+import { ReactFlow, Background, Controls, MiniMap, Panel, Handle, Position, useNodesState, useReactFlow, type Node, type Edge, type NodeProps } from '@xyflow/react'
 import { useStore, agentColor, alertTargets, type FileEntry } from '../store'
-import { alertFiles, edgeAlerts } from '../alertGraph'
 
 const COL = 290
 const ROW = 84
@@ -63,13 +62,13 @@ function LabelNode({ data }: NodeProps<Node<LabelData, 'label'>>) {
 }
 
 function FileNode({ data }: NodeProps<Node<FileData, 'file'>>) {
-  const { base, dir, tint, border, owner, drift, touching, dim, selected } = data
+  const { base, dir, tint, border, owner, touching, dim, selected } = data
   return (
     <div
       className="relative w-48 rounded-lg px-2.5 py-1.5 font-mono text-xs transition-opacity"
       style={{
         background: tint ?? 'var(--canvas)',
-        border: owner ? '2px solid var(--warn)' : drift ? '2px solid var(--danger)' : `1px solid ${border ?? 'var(--line)'}`,
+        border: owner ? '2px solid var(--warn)' : `1px solid ${border ?? 'var(--line)'}`,
         boxShadow: selected ? '0 0 0 2px var(--faint)' : undefined,
         opacity: dim ? 0.25 : 1,
       }}
@@ -77,7 +76,6 @@ function FileNode({ data }: NodeProps<Node<FileData, 'file'>>) {
       <Handle type="target" position={Position.Left} />
       <div className="truncate font-medium">{base}</div>
       <div className="truncate text-[11px] text-faint">{dir || ' '}</div>
-      {drift && <div className={`mt-1 text-[10px] ${owner ? 'text-warn' : 'text-danger'}`}>{owner ? 'Contract owner' : 'Affected consumer'}</div>}
       {touching.length > 0 && (
         <div className="absolute -top-2.5 -right-2.5 flex -space-x-1">
           {touching.map((a) => (
@@ -101,10 +99,8 @@ const nodeTypes = { file: FileNode, label: LabelNode }
 
 export default function CodebaseMap() {
   const s = useStore()
-  const { files, agents, claims, alerts, hoveredAgent, selectedFile, selectedAlert, selectFile, focusAlert, mapFocusVersion, theme } = s
+  const { files, agents, claims, alerts, hoveredAgent, selectedFile, selectFile, theme } = s
   const { fitView } = useReactFlow()
-  const initialized = useNodesInitialized()
-  const lastFocus = useRef('')
   const fileKey = files.map((f) => `${f.path}<${f.deps.join(',')}`).join('|')
   const layout = useMemo(() => layoutColumns(files), [fileKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const [nodes, setNodes, onNodesChange] = useNodesState<MapNode>([])
@@ -112,28 +108,13 @@ export default function CodebaseMap() {
   // Re-layout only when the file set changes (keeps user drags otherwise).
   useEffect(() => {
     setNodes(layout)
-  }, [layout, setNodes])
+    setTimeout(() => fitView({ padding: 0.15, duration: 400 }), 50)
+  }, [layout, setNodes, fitView])
 
   // Live state -> node data.
   const open = alerts.filter((a) => a.status === 'open')
-  const driftFiles = new Set(open.flatMap(alertFiles))
-  const owners = new Set(open.map((a) => a.owner).filter(Boolean))
-  const focusedAlert = alerts.find((a) => a.id === selectedAlert)
-  const focusPaths = selectedFile ? [selectedFile] : focusedAlert ? alertFiles(focusedAlert) : []
-  const focusKey = JSON.stringify([mapFocusVersion, selectedAlert, focusPaths, fileKey])
-  const nodesKey = nodes.map((n) => n.id).join('|')
-
-  // Wait for React Flow to measure newly arrived nodes; don't recenter on every
-  // unrelated event, hover, or drag. Remounts also focus the selected alert.
-  useEffect(() => {
-    if (!initialized || lastFocus.current === focusKey) return
-    if (focusPaths.some((path) => !nodes.some((n) => n.id === path))) return
-    lastFocus.current = focusKey
-    void fitView({
-      nodes: focusPaths.length ? focusPaths.map((id) => ({ id })) : undefined,
-      padding: 0.35, maxZoom: 1.2, duration: 500,
-    })
-  }, [initialized, focusKey, nodesKey, fitView]) // eslint-disable-line react-hooks/exhaustive-deps
+  const driftFiles = new Set(open.flatMap((a) => alertTargets(s, a).files))
+  const dependents = new Set(files.flatMap((f) => f.deps))
   const liveNodes = nodes.map((n): MapNode => {
     if (n.type !== 'file') return n
     const cl = claims.filter((c) => c.path === n.id)
@@ -149,7 +130,7 @@ export default function CodebaseMap() {
         ...n.data,
         tint: color && `${color}2e`,
         border: color,
-        owner: owners.has(n.id),
+        owner: drift && dependents.has(n.id),
         drift,
         touching,
         dim: !!hoveredAgent && !involved,
@@ -159,18 +140,12 @@ export default function CodebaseMap() {
   })
 
   const depEdges: Edge[] = files.flatMap((f) =>
-    f.deps.map((d) => {
-      const breaks = edgeAlerts(open, d, f.path)
-      return {
-        id: JSON.stringify([d, f.path]), source: d, target: f.path,
-        animated: breaks.length > 0,
-        label: breaks.map((a) => a.contract).filter(Boolean).join(', ') || undefined,
-        style: { stroke: breaks.length ? 'var(--warn)' : 'var(--faint)', strokeWidth: breaks.length ? 2.5 : 1.25 },
-        labelStyle: { fill: 'var(--fg)', fontSize: 11 },
-        labelBgStyle: { fill: 'var(--canvas)' },
-        data: { alertId: breaks[0]?.id },
-      }
-    }),
+    f.deps.map((d) => ({
+      id: `dep:${d}->${f.path}`,
+      source: d,
+      target: f.path,
+      style: { stroke: 'var(--faint)', strokeWidth: 1.25 },
+    })),
   )
 
   if (!files.length) {
@@ -188,7 +163,6 @@ export default function CodebaseMap() {
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
       onNodeClick={(_, n) => n.type === 'file' && selectFile(n.id)}
-      onEdgeClick={(_, edge) => { if (edge.data?.alertId) focusAlert(String(edge.data.alertId)) }}
       onPaneClick={() => selectFile(null)}
       colorMode={theme}
       minZoom={0.2}
@@ -214,25 +188,9 @@ export default function CodebaseMap() {
             <span className="h-3 w-3 rounded-sm border-2 border-warn" />
             Owns a drifting contract
           </span>
-          <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm border-2 border-danger" />Affected consumer</span>
-          <span className="w-full text-faint">Animated edges show affected dependencies. Click to inspect.</span>
           <span className="w-full text-faint">Shaded = claimed - initial = editing now</span>
         </div>
       </Panel>
-      {focusedAlert && !selectedFile && (
-        <Panel position="top-left">
-          <div className="max-h-[60vh] w-72 overflow-y-auto rounded-xl border border-line bg-canvas p-4 text-xs shadow-lg">
-            <div className="font-semibold">{focusedAlert.contract ?? 'Contract context unavailable'}</div>
-            <p className="mt-2">{focusedAlert.message}</p>
-            {focusedAlert.suggestion && <p className="mt-2 text-muted">{focusedAlert.suggestion}</p>}
-            {focusedAlert.editId && <p className="mt-2 text-faint">Originating edit #{focusedAlert.editId}</p>}
-            {focusedAlert.owner && <div className="mt-3"><span className="text-warn">Owner</span><button className="mt-1 block text-left font-mono break-all hover:underline" onClick={() => selectFile(focusedAlert.owner!)}>{focusedAlert.owner}</button></div>}
-            {!!focusedAlert.consumers?.length && <div className="mt-3 text-danger">Affected consumers</div>}
-            {focusedAlert.consumers?.map((path) => <button key={path} className="mt-1 block text-left font-mono break-all hover:underline" onClick={() => selectFile(path)}>{path}</button>)}
-            {!alertFiles(focusedAlert).length && <p className="mt-2 text-faint">This alert has no recorded file context.</p>}
-          </div>
-        </Panel>
-      )}
       {selectedFile && (
         <div className="absolute top-4 left-4 z-10 w-72 rounded-xl border border-line bg-canvas p-4 text-xs shadow-lg">
           <div className="mb-2 font-mono break-all">{selectedFile}</div>
@@ -243,7 +201,7 @@ export default function CodebaseMap() {
             </div>
           ))}
           {fileAlerts.map((a) => (
-            <button key={a.id} onClick={() => focusAlert(a.id)} className="mt-2 block text-left text-danger hover:underline">{a.contract && <span className="block font-semibold">{a.contract}</span>}{a.message}</button>
+            <div key={a.id} className="mt-1 text-danger">{a.message}</div>
           ))}
           {!fileClaims.length && !fileAlerts.length && <div className="text-faint">Unclaimed</div>}
         </div>

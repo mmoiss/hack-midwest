@@ -6,36 +6,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const DEFAULT_DB_PATH = fileURLToPath(new URL('../coordinator.db', import.meta.url))
+const DB_PATH = process.env.DB_PATH ?? fileURLToPath(new URL('../backend/coordinator.db', import.meta.url))
 const PORT = Number(process.env.PORT ?? 3001)
 const NP = '[NOT PROVISIONED]'
 
 type Row = { id: number; ts: string; agent: string; type: string; payload: string }
-type Msg = { type: string; data: any; ts?: number }
-
-const strings = (value: unknown): string[] => Array.isArray(value) ? value.filter((s): s is string => typeof s === 'string' && !!s) : []
-
-function alertData(db: DatabaseSync, r: Row, p: any) {
-  const editId = Number(p.edit_id)
-  const origin = Number.isSafeInteger(editId) && editId > 0
-    ? db.prepare("SELECT payload FROM events WHERE id = ? AND type = 'edit'").get(editId) as { payload: string } | undefined
-    : undefined
-  const owner = typeof p.owner === 'string' ? p.owner : origin ? JSON.parse(origin.payload).file : undefined
-  // Only explicit provenance can identify a contract. Never guess from claims or timing.
-  const specs = typeof p.contract === 'string'
-    ? db.prepare('SELECT contract, owner, consumers FROM spec WHERE contract = ?').all(p.contract)
-    : owner ? db.prepare('SELECT contract, owner, consumers FROM spec WHERE owner = ?').all(owner) : []
-  const spec = specs.length === 1 ? specs[0] as { contract: string; owner: string; consumers: string } : undefined
-  const consumers = Array.isArray(p.consumers) ? strings(p.consumers) : spec ? strings(JSON.parse(spec.consumers)) : []
-  const ownerPath = owner ?? spec?.owner
-  const files = [...new Set([...strings(p.files), ...(ownerPath ? [ownerPath] : []), ...consumers])]
-  return {
-    id: String(r.id), type: p.escalated ? 'decision' : 'drift', severity: p.severity ?? '',
-    agents: strings(p.affected), files, message: p.summary ?? p.question ?? '', suggestion: p.suggested_fix,
-    contract: p.contract ?? spec?.contract, owner: ownerPath, consumers,
-    editId: Number.isSafeInteger(editId) && editId > 0 ? String(editId) : undefined,
-  }
-}
+type Msg = { type: string; data: any }
 
 // TEAM_TOKENS, the same env var the Python server reads: token -> {name, color}.
 function parseColors(teamTokens = '{}'): Record<string, string> {
@@ -50,7 +26,7 @@ let COLORS: Record<string, string> = {}
 const agent = (name: string) => ({ id: name, name, owner: name, color: COLORS[name] ?? '#a1a1aa', tool: NP, status: NP, task: NP })
 
 // One `events` row -> dashboard messages (see the contract in src/store.ts).
-export function translate(db: DatabaseSync, r: Row): Msg[] {
+function translate(db: DatabaseSync, r: Row): Msg[] {
   const p = JSON.parse(r.payload)
   const agentId = r.agent
   switch (r.type) {
@@ -68,14 +44,14 @@ export function translate(db: DatabaseSync, r: Row): Msg[] {
     case 'alert':
       return [{
         type: 'alert.add',
-        data: alertData(db, r, p),
+        data: { id: String(r.id), type: NP, severity: NP, agents: p.affected ?? [], files: [], message: p.summary, suggestion: p.suggested_fix },
       }]
     default: // check_conflicts, get_spec, checked_clean: feed only
       return [{ type: r.type, data: { agentId, ...p } }]
   }
 }
 
-export function snapshot(db: DatabaseSync, rows: Row[]) {
+function snapshot(db: DatabaseSync, rows: Row[]) {
   const specs = db.prepare('SELECT owner, consumers FROM spec').all() as any[]
   const claims = db.prepare('SELECT agent, file, summary FROM claims').all() as any[]
   // Files the spec knows about; a consumer depends on its contract's owner.
@@ -99,26 +75,23 @@ export function snapshot(db: DatabaseSync, rows: Row[]) {
 }
 
 // Returns the /api/stream handler. Vite passes TEAM_TOKENS from .env; standalone reads process.env.
-export function createStream(teamTokens = process.env.TEAM_TOKENS, dbPath = process.env.DB_PATH ?? DEFAULT_DB_PATH) {
+export function createStream(teamTokens = process.env.TEAM_TOKENS) {
   COLORS = parseColors(teamTokens)
-  return (req: IncomingMessage, res: ServerResponse) => stream(req, res, dbPath)
+  return stream
 }
 
-function stream(req: IncomingMessage, res: ServerResponse, dbPath: string) {
-  let db!: DatabaseSync
-  let rows: Row[]
-  let snap: ReturnType<typeof snapshot>
+function stream(req: IncomingMessage, res: ServerResponse) {
+  let db: DatabaseSync
   try {
-    db = new DatabaseSync(dbPath, { readOnly: true })
-    rows = db.prepare('SELECT * FROM events ORDER BY id').all() as Row[]
-    snap = snapshot(db, rows)
+    db = new DatabaseSync(DB_PATH, { readOnly: true })
   } catch (e) {
-    db?.close()
-    return res.writeHead(503).end(`Cannot open ${dbPath}: ${e}`) // EventSource retries
+    return res.writeHead(503).end(`Cannot open ${DB_PATH}: ${e}`) // EventSource retries
   }
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
   const send = (m: Msg) => res.write(`data: ${JSON.stringify(m)}\n\n`)
 
+  const rows = db.prepare('SELECT * FROM events ORDER BY id').all() as Row[]
+  const snap = snapshot(db, rows)
   send({ type: 'snapshot', data: snap })
   let lastId = rows.at(-1)?.id ?? 0
   const seenAgents = new Set(snap.agents.map((a) => a.id))
@@ -131,7 +104,7 @@ function stream(req: IncomingMessage, res: ServerResponse, dbPath: string) {
       for (const m of translate(db, r)) {
         const path = m.type === 'claim.add' || m.type === 'file.touch' ? m.data.path : null
         if (path && !seenFiles.has(path)) seenFiles.add(path), send({ type: 'file.add', data: { path } })
-        send({ ...m, ts: Date.parse(r.ts + 'Z') })
+        send(m)
       }
       lastId = r.id
     }
@@ -142,8 +115,8 @@ function stream(req: IncomingMessage, res: ServerResponse, dbPath: string) {
   })
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const handler = createStream()
   createServer((req, res) => (req.url === '/api/stream' ? handler(req, res) : res.writeHead(404).end()))
-    .listen(PORT, () => console.log(`dashboard server on :${PORT}, reading ${process.env.DB_PATH ?? DEFAULT_DB_PATH}`))
+    .listen(PORT, () => console.log(`dashboard server on :${PORT}, reading ${DB_PATH}`))
 }
