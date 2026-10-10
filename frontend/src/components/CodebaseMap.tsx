@@ -1,13 +1,17 @@
 import { useEffect, useMemo } from 'react'
-import { ReactFlow, Background, Controls, MiniMap, Handle, Position, useNodesState, useReactFlow } from '@xyflow/react'
-import { useStore, agentColor } from '../store'
+import { ReactFlow, Background, Controls, MiniMap, Handle, Position, useNodesState, useReactFlow, type Node, type Edge, type NodeProps } from '@xyflow/react'
+import { useStore, agentColor, type FileEntry } from '../store'
 
 const COL = 230
 const ROW = 58
 
+type TreeNode = { id: string; name: string; isFile: boolean; children: Map<string, TreeNode> }
+type NodeData = { name: string; claimants: string[]; touching: { id: string; name: string; color: string }[]; alert: 'collision' | 'drift' | null; dim: boolean; selected: boolean }
+type MapNode = Node<NodeData, 'file' | 'dir'>
+
 // Turn flat file paths into a left-to-right tree layout.
-function layoutTree(files) {
-  const root = { id: 'd:', name: 'repo', children: new Map() }
+function layoutTree(files: FileEntry[]) {
+  const root: TreeNode = { id: 'd:', name: 'repo', isFile: false, children: new Map() }
   for (const f of files) {
     let node = root
     const parts = f.path.split('/')
@@ -15,21 +19,21 @@ function layoutTree(files) {
       const path = parts.slice(0, i + 1).join('/')
       const isFile = i === parts.length - 1
       if (!node.children.has(part)) node.children.set(part, { id: isFile ? path : `d:${path}`, name: part, isFile, children: new Map() })
-      node = node.children.get(part)
+      node = node.children.get(part)!
     })
   }
-  const nodes = []
-  const edges = []
+  const nodes: MapNode[] = []
+  const edges: Edge[] = []
   let row = 0
-  const walk = (n, depth, parent) => {
-    const kids = [...n.children.values()].sort((a, b) => a.isFile - b.isFile || a.name.localeCompare(b.name))
-    let y
+  const walk = (n: TreeNode, depth: number, parent: string | null): number => {
+    const kids = [...n.children.values()].sort((a, b) => Number(a.isFile) - Number(b.isFile) || a.name.localeCompare(b.name))
+    let y: number
     if (!kids.length) y = row++ * ROW
     else {
       const ys = kids.map((k) => walk(k, depth + 1, n.id))
       y = (Math.min(...ys) + Math.max(...ys)) / 2
     }
-    nodes.push({ id: n.id, type: n.isFile ? 'file' : 'dir', position: { x: depth * COL, y }, data: { name: n.name } })
+    nodes.push({ id: n.id, type: n.isFile ? 'file' : 'dir', position: { x: depth * COL, y }, data: { name: n.name, claimants: [], touching: [], alert: null, dim: false, selected: false } })
     if (parent) edges.push({ id: `t:${parent}->${n.id}`, source: parent, target: n.id, type: 'smoothstep', style: { stroke: 'var(--line)' } })
     return y
   }
@@ -37,7 +41,7 @@ function layoutTree(files) {
   return { nodes, edges }
 }
 
-function DirNode({ data }) {
+function DirNode({ data }: NodeProps<MapNode>) {
   return (
     <div className="rounded-lg bg-surface px-2.5 py-1 font-mono text-xs text-muted" style={{ opacity: data.dim ? 0.3 : 1 }}>
       <Handle type="target" position={Position.Left} />
@@ -47,7 +51,7 @@ function DirNode({ data }) {
   )
 }
 
-function FileNode({ data }) {
+function FileNode({ data }: NodeProps<MapNode>) {
   const { name, claimants, touching, alert, dim, selected } = data
   const ring = alert === 'collision' ? 'ring-2 ring-danger animate-flash' : alert === 'drift' ? 'ring-2 ring-warn animate-flash' : selected ? 'ring-2 ring-faint' : ''
   return (
@@ -68,7 +72,7 @@ function FileNode({ data }) {
               key={a.id}
               title={`${a.name} editing`}
               className="flex h-5 w-5 animate-pulse items-center justify-center rounded-full font-sans text-[10px] font-semibold text-white ring-2 ring-canvas"
-              style={{ background: agentColor(agents, a.id) }}
+              style={{ background: a.color }}
             >
               {a.name[0]}
             </span>
@@ -92,7 +96,7 @@ export default function CodebaseMap() {
   const { fitView } = useReactFlow()
   const fileKey = files.map((f) => f.path).join('|')
   const tree = useMemo(() => layoutTree(files), [fileKey]) // eslint-disable-line react-hooks/exhaustive-deps
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
+  const [nodes, setNodes, onNodesChange] = useNodesState<MapNode>([])
 
   // Re-layout only when the file set changes (keeps user drags otherwise).
   useEffect(() => {
@@ -102,11 +106,13 @@ export default function CodebaseMap() {
 
   // Live state -> node data.
   const open = alerts.filter((a) => a.status === 'open')
-  const dataFor = (id, base) => {
+  const dataFor = (id: string, base: MapNode): NodeData => {
     const cl = claims.filter((c) => c.path === id)
-    const touching = Object.values(agents).filter((a) => a.currentFile === id)
+    const touching = Object.values(agents)
+      .filter((a) => a.currentFile === id)
+      .map((a) => ({ id: a.id, name: a.name, color: agentColor(agents, a.id) }))
     const hit = open.filter((a) => a.files.includes(id))
-    const alert = hit.some((a) => a.type === 'collision') ? 'collision' : hit.length ? 'drift' : null
+    const alert: NodeData['alert'] = hit.some((a) => a.type === 'collision') ? 'collision' : hit.length ? 'drift' : null
     const involved = cl.some((c) => c.agentId === hoveredAgent) || touching.some((a) => a.id === hoveredAgent)
     const dim = !!hoveredAgent && (base.type === 'dir' || !involved)
     return {
@@ -122,8 +128,8 @@ export default function CodebaseMap() {
 
   // Dependency edges; light up the ones on a drift path.
   const driftFiles = new Set(open.filter((a) => a.type === 'drift').flatMap((a) => a.files))
-  const depEdges = files.flatMap((f) =>
-    (f.deps ?? []).map((d) => {
+  const depEdges: Edge[] = files.flatMap((f) =>
+    f.deps.map((d) => {
       const hot = driftFiles.has(f.path) && driftFiles.has(d)
       return {
         id: `dep:${f.path}->${d}`,
@@ -153,7 +159,7 @@ export default function CodebaseMap() {
     >
       <Background color="var(--line)" gap={24} />
       <Controls showInteractive={false} />
-      <MiniMap pannable zoomable nodeColor={(n) => (n.data.alert ? 'var(--danger)' : n.data.claimants?.[0] ?? 'var(--line)')} maskColor="color-mix(in srgb, var(--surface) 75%, transparent)" />
+      <MiniMap<MapNode> pannable zoomable nodeColor={(n) => (n.data.alert ? 'var(--danger)' : n.data.claimants[0] ?? 'var(--line)')} maskColor="color-mix(in srgb, var(--surface) 75%, transparent)" />
     </ReactFlow>
   )
 }

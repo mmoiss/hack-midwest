@@ -16,27 +16,75 @@ import { create } from 'zustand'
  * alert.resolve    { id }
  */
 
-const initial = {
+export type AgentStatus = 'editing' | 'idle' | 'blocked' | string
+export type Agent = { id: string; name: string; owner?: string; tool?: string; color?: string; status?: AgentStatus; task?: string; currentFile?: string }
+export type FileEntry = { path: string; deps: string[] }
+export type Claim = { agentId: string; path: string; intent: string }
+export type ProposalStatus = 'pending' | 'accepted' | 'rejected'
+export type Proposal = {
+  id: string; agentId: string; title: string; target: string; rationale?: string
+  before: string; after: string; status: ProposalStatus; affects: string[]; ts?: number
+}
+export type AlertType = 'collision' | 'drift' | string
+export type Alert = {
+  id: string; type: AlertType; severity: string; agents: string[]; files: string[]
+  message: string; suggestion?: string; status: 'open' | 'resolved'; ts: number
+}
+export type FeedEvent = { id: string; type: string; data: any; ts: number }
+export type Msg = { type: string; data?: any; ts?: number }
+export type Theme = 'light' | 'dark'
+export type Connection = 'connecting' | 'live' | 'offline'
+export type Tab = 'changes' | 'alerts' | 'feed'
+
+type Data = {
+  agents: Record<string, Agent>
+  files: FileEntry[]
+  claims: Claim[]
+  proposals: Proposal[]
+  alerts: Alert[]
+  events: FeedEvent[]
+  lastAlert: Alert | null
+}
+
+export type State = Data & {
+  theme: Theme
+  connection: Connection
+  tab: Tab
+  selectedProposal: string | null
+  selectedFile: string | null
+  hoveredAgent: string | null
+  toggleTheme: () => void
+  apply: (msg: Msg) => void
+  setConnection: (c: Connection) => void
+  setTab: (t: Tab) => void
+  selectProposal: (id: string) => void
+  selectFile: (path: string | null) => void
+  hoverAgent: (id: string | null) => void
+  decideProposal: (id: string, status: ProposalStatus) => void
+  resolveAlert: (id: string) => void
+}
+
+const initial: Data = {
   agents: {},
   files: [],
   claims: [],
   proposals: [],
   alerts: [],
   events: [],
+  lastAlert: null,
 }
 
 // Fill defaults so a half-built backend message can't white-screen the UI.
 const fix = {
-  file: (f) => ({ deps: [], ...f }),
-  proposal: (p) => ({ status: 'pending', affects: [], before: '', after: '', ...p }),
-  alert: (a) => ({ status: 'open', severity: 'med', agents: [], files: [], message: '', ...a }),
+  file: (f: any): FileEntry => ({ deps: [], ...f }),
+  proposal: (p: any): Proposal => ({ status: 'pending', affects: [], before: '', after: '', ...p }),
+  alert: (a: any): Alert => ({ status: 'open', severity: 'med', agents: [], files: [], message: '', ...a }),
 }
 
-function reduce(s, { type, data = {}, ts = Date.now() }) {
+function reduce(s: State, { type, data = {}, ts = Date.now() }: Msg): Partial<State> {
   if (type === 'snapshot') {
     return {
-      ...s,
-      agents: Object.fromEntries((data.agents ?? []).map((a) => [a.id, a])),
+      agents: Object.fromEntries(((data.agents ?? []) as Agent[]).map((a) => [a.id, a])),
       files: (data.files ?? []).map(fix.file),
       claims: data.claims ?? [],
       proposals: (data.proposals ?? []).map(fix.proposal),
@@ -45,7 +93,7 @@ function reduce(s, { type, data = {}, ts = Date.now() }) {
     }
   }
   const events = [{ id: `${ts}-${Math.random()}`, type, data, ts }, ...s.events].slice(0, 300)
-  const next = { ...s, events }
+  const next: Partial<State> = { events }
   switch (type) {
     case 'agent.upsert':
       next.agents = { ...s.agents, [data.id]: { ...s.agents[data.id], ...data } }
@@ -82,18 +130,19 @@ function reduce(s, { type, data = {}, ts = Date.now() }) {
 // Agents get a color from this palette in registration order; the backend's color is ignored
 // so the UI stays on one warm, tame scheme.
 export const PALETTE = ['#c8794a', '#7a9a6e', '#6a86a3', '#b0655c', '#8f8a5a', '#9a7b5a']
-export const agentColor = (agents, id) => PALETTE[Object.keys(agents).indexOf(id) % PALETTE.length] ?? '#b3b0a8'
+export const agentColor = (agents: Record<string, Agent>, id: string): string =>
+  PALETTE[Object.keys(agents).indexOf(id) % PALETTE.length] ?? '#b3b0a8'
 
-const savedTheme = () => {
-  try { return localStorage.getItem('theme') } catch { return null }
+const savedTheme = (): Theme | null => {
+  try { return localStorage.getItem('theme') as Theme | null } catch { return null }
 }
 
-export const useStore = create((set) => ({
+export const useStore = create<State>()((set) => ({
   ...initial,
   theme: savedTheme() ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
   toggleTheme: () =>
     set((s) => {
-      const theme = s.theme === 'dark' ? 'light' : 'dark'
+      const theme: Theme = s.theme === 'dark' ? 'light' : 'dark'
       try { localStorage.setItem('theme', theme) } catch {}
       return { theme }
     }),
@@ -102,7 +151,6 @@ export const useStore = create((set) => ({
   selectedProposal: null,
   selectedFile: null,
   hoveredAgent: null,
-  lastAlert: null,
 
   apply: (msg) => set((s) => reduce(s, msg)),
   setConnection: (connection) => set({ connection }),
@@ -117,5 +165,5 @@ export const useStore = create((set) => ({
 }))
 
 // Derived helpers
-export const openAlerts = (s) => s.alerts.filter((a) => a.status === 'open')
-export const pendingProposals = (s) => s.proposals.filter((p) => p.status === 'pending')
+export const openAlerts = (s: State) => s.alerts.filter((a) => a.status === 'open')
+export const pendingProposals = (s: State) => s.proposals.filter((p) => p.status === 'pending')

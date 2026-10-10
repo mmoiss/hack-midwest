@@ -1,7 +1,7 @@
 // Dashboard server: reads the coordinator's SQLite file (read-only) and pushes
 // it to the browser over Server-Sent Events, per SPEC.md. Python is the only writer.
 //   GET /api/stream  ->  `snapshot` first, then one message per new `events` row.
-// In dev, vite.config.js mounts `stream` directly; `npm run server` runs it standalone.
+// In dev, vite.config.ts mounts `stream` directly; `npm run server` runs it standalone.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -25,7 +25,7 @@ function parseColors(teamTokens = '{}'): Record<string, string> {
 let COLORS: Record<string, string> = {}
 const agent = (name: string) => ({ id: name, name, owner: name, color: COLORS[name] ?? '#a1a1aa', tool: NP, status: NP, task: NP })
 
-// One `events` row -> dashboard messages (see the contract in src/store.js).
+// One `events` row -> dashboard messages (see the contract in src/store.ts).
 function translate(db: DatabaseSync, r: Row): Msg[] {
   const p = JSON.parse(r.payload)
   const agentId = r.agent

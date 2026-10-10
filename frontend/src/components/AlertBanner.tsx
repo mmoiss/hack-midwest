@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import { useStore, agentColor } from '../store'
+import { useStore, agentColor, type Alert } from '../store'
 
 // Flash over the map for ~5s when the coordinator raises an alert.
 export default function AlertBanner() {
   const { lastAlert, agents, setTab } = useStore()
-  const [shown, setShown] = useState(null)
+  const [shown, setShown] = useState<Alert | null>(null)
 
   useEffect(() => {
     if (!lastAlert) return

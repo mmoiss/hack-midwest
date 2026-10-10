@@ -1,6 +1,6 @@
 import { useStore, agentColor } from '../store'
 
-const STATUS = {
+const STATUS: Record<string, string> = {
   editing: 'bg-ok-soft text-ok',
   blocked: 'bg-danger-soft text-danger',
 }
@@ -25,7 +25,7 @@ export default function AgentPanel() {
               <div className="flex items-center gap-2">
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: agentColor(agents, a.id) }} />
                 <span className="text-sm font-medium">{a.name}</span>
-                <span className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS[a.status] ?? 'bg-surface text-muted'}`}>{a.status}</span>
+                <span className={`ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS[a.status ?? ''] ??'bg-surface text-muted'}`}>{a.status}</span>
               </div>
               {a.task && <div className="mt-1 pl-4.5 text-xs text-muted">{a.task}</div>}
               {a.currentFile && <div className="mt-1 truncate pl-4.5 font-mono text-[11px] text-faint">{a.currentFile}</div>}

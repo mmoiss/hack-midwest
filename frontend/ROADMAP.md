@@ -34,19 +34,19 @@ npm run dev                      # connects to FastAPI on localhost:8000 via the
 
 | Feature | Where | Status |
 |---|---|---|
-| Codebase map (tree layout, deps, drag, minimap) | `src/components/CodebaseMap.jsx` | ✅ |
-| Agent colors (stripes, markers, hover spotlight) | `AgentPanel.jsx`, `CodebaseMap.jsx` | ✅ |
-| Proposed changes tab with a diff for each change | `RightPanel.jsx` → `Changes`, `Diff` | ✅ |
-| Collision and drift signals (rings, banner, cards) | `CodebaseMap.jsx`, `AlertBanner.jsx`, `RightPanel.jsx` → `Alerts` | ✅ |
-| Live event feed | `RightPanel.jsx` → `Feed` | ✅ |
+| Codebase map (tree layout, deps, drag, minimap) | `src/components/CodebaseMap.tsx` | ✅ |
+| Agent colors (stripes, markers, hover spotlight) | `AgentPanel.tsx`, `CodebaseMap.tsx` | ✅ |
+| Proposed changes tab with a diff for each change | `RightPanel.tsx` → `Changes`, `Diff` | ✅ |
+| Collision and drift signals (rings, banner, cards) | `CodebaseMap.tsx`, `AlertBanner.tsx`, `RightPanel.tsx` → `Alerts` | ✅ |
+| Live event feed | `RightPanel.tsx` → `Feed` | ✅ |
 | WebSocket client with reconnect | `src/ws.js` | ✅ |
-| State + event reducer | `src/store.js` | ✅ |
+| State + event reducer | `src/store.ts` | ✅ |
 
 ---
 
 ## Contract with the backend (agree on this first)
 
-The full schema is at the top of `src/store.js`.
+The full schema is at the top of `src/store.ts`.
 
 **WebSocket `/ws`.** The server sends `snapshot` on connect, then one message per event. Every message has the shape `{type, data, ts}`.
 
@@ -69,7 +69,7 @@ The full schema is at the top of `src/store.js`.
 
 The backend applies each decision, then broadcasts the resulting event, so every open dashboard stays in sync.
 
-**Colors:** the dashboard assigns each agent a color from its own warm palette in registration order (`PALETTE` in `store.js`) and ignores the backend's `color` field, so the scheme stays consistent no matter what tokens are configured.
+**Colors:** the dashboard assigns each agent a color from its own warm palette in registration order (`PALETTE` in `store.ts`) and ignores the backend's `color` field, so the scheme stays consistent no matter what tokens are configured.
 
 **Diffs:** proposals send the full `before` and `after` text, and the frontend computes the diff. This means the backend never has to produce unified diffs.
 

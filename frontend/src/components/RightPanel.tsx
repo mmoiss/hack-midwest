@@ -1,9 +1,9 @@
 import { diffLines } from 'diff'
-import { useStore, openAlerts, pendingProposals, agentColor } from '../store'
+import { useStore, openAlerts, pendingProposals, agentColor, type Agent, type FeedEvent, type Tab } from '../store'
 
 export default function RightPanel() {
   const s = useStore()
-  const tabs = [
+  const tabs: [Tab, string, number, string?][] = [
     ['changes', 'Changes', pendingProposals(s).length, 'bg-ink text-ink-fg'],
     ['alerts', 'Alerts', openAlerts(s).length, 'bg-danger text-white'],
     ['feed', 'Feed', 0],
@@ -18,7 +18,7 @@ export default function RightPanel() {
             className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-1.5 font-medium transition-colors ${s.tab === id ? 'bg-surface' : 'text-muted hover:text-fg'}`}
           >
             {label}
-            {n > 0 && <span className={`rounded-full px-1.5 text-[11px] font-semibold ${badge}`}>{n}</span>}
+            {n > 0 && <span className={`rounded-full px-1.5 text-[11px] font-semibold ${badge ?? ''}`}>{n}</span>}
           </button>
         ))}
       </nav>
@@ -31,7 +31,7 @@ export default function RightPanel() {
   )
 }
 
-const STATUS_PILL = {
+const STATUS_PILL: Record<string, string> = {
   pending: 'bg-surface text-muted',
   accepted: 'bg-ok-soft text-ok',
   rejected: 'bg-surface text-faint line-through',
@@ -144,8 +144,8 @@ function Alerts() {
   )
 }
 
-function describe(e, agents) {
-  const name = (id) => agents[id]?.name ?? id
+function describe(e: FeedEvent, agents: Record<string, Agent>): [string | null, string] {
+  const name = (id: string) => agents[id]?.name ?? id
   const d = e.data
   switch (e.type) {
     case 'agent.upsert': return [d.id, `${name(d.id)} ${d.status ?? 'updated'}`]
@@ -180,6 +180,6 @@ function Feed() {
   )
 }
 
-function Empty({ children }) {
+function Empty({ children }: { children: React.ReactNode }) {
   return <div className="py-10 text-center text-sm text-faint">{children}</div>
 }

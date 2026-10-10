@@ -1,7 +1,7 @@
 import { useStore } from './store'
 
 // Defaults to same-origin /api/stream (server.ts, mounted inside Vite in dev).
-const STREAM_URL = import.meta.env.VITE_STREAM_URL ?? '/api/stream'
+const STREAM_URL: string = import.meta.env.VITE_STREAM_URL ?? '/api/stream'
 
 // Subscribes to the dashboard server's SSE feed. The server sends a `snapshot`
 // on every (re)connect, then incremental events. EventSource reconnects itself.

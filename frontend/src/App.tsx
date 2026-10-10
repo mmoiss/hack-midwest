@@ -10,7 +10,7 @@ import AlertBanner from './components/AlertBanner'
 
 export default function App() {
   const theme = useStore((s) => s.theme)
-  useEffect(() => connectLive(), [])
+  useEffect(connectLive, [])
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
   }, [theme])
