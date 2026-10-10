@@ -19,6 +19,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
     // Serve the SQLite feed from the dev server itself, so `npm run dev` is all you need.
-    { name: 'dashboard-stream', configureServer: (s) => void s.middlewares.use('/api/stream', createStream(readEnv().TEAM_TOKENS)) },
+    { name: 'dashboard-stream', configureServer: (s) => {
+      const env = readEnv()
+      s.middlewares.use('/api/stream', createStream(process.env.TEAM_TOKENS ?? env.TEAM_TOKENS, process.env.DB_PATH ?? env.DB_PATH))
+    } },
   ],
 })

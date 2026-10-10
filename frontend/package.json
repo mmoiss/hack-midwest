@@ -8,6 +8,7 @@
     "server": "node --env-file-if-exists=.env server.ts",
     "build": "tsc && vite build",
     "typecheck": "tsc",
+    "test": "node --test tests/*.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
