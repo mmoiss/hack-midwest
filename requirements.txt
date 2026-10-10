@@ -1,3 +1,8 @@
 fastmcp
 strands-agents[openai,anthropic,ollama]
 truststore
+
+# coordinator.py imports these directly; judge_edit now runs it on every edit, so a broken
+# transitive resolution here silently kills every drift check.
+python-dotenv>=1.0,<2.0
+pydantic>=2.0,<3.0

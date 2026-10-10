@@ -175,6 +175,15 @@ a silent failure that looks like a broken coordinator. Fixed; `/health` reportin
 **An empty `spec` table means drift can never fire.** `/events` only calls the coordinator
 for files that *own* a contract. Run the seed after any fresh deploy.
 
+**Anything `coordinator.py` imports directly must be in `requirements.txt`.** It is not
+enough that the package resolves transitively today. `judge_edit` wraps the whole coordinator
+call — including `from backend.coordinator import run_coordinator` — in a blanket
+`except Exception`, deliberately, so a model outage cannot turn a hook into a `500`. The side
+effect is that an `ImportError` is swallowed too, and a missing dependency looks exactly like
+a clean "no drift found" verdict: every edit passes silently, with nothing but one line in the
+container log to say otherwise. `python-dotenv` and `pydantic` are declared explicitly for
+this reason; add any future direct import the same way.
+
 ---
 
 ## 5. Verified, and not
@@ -203,9 +212,8 @@ test: plain completion 2.9s, tool call 3.4s, 368 tokens. The structured-output f
   open door. Set the default inbound policy to DROP with ACCEPT rules for 22/80/443 to close
   it.
 - The dashboard service and its Caddy route are not deployed.
-- `coordinator.py` imports `dotenv` but `python-dotenv` is not declared in
-  `requirements.txt`. It resolves transitively today, so this works — it is one `pip`
-  resolution away from not working.
+- The Cloud Firewall gap above is the only outstanding dependency-or-config risk; the
+  undeclared-import problem that used to sit here is fixed — see the trap below.
 
 ---
 
