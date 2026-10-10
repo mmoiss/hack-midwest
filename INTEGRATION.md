@@ -211,9 +211,28 @@ test: plain completion 2.9s, tool call 3.4s, 368 tokens. The structured-output f
 
 ## 6. Redeploying
 
+**Merging on GitHub does not redeploy anything.** The VM keeps running whatever was last
+`git pull`'d and `docker compose up --build`'d on it, regardless of what `main` looks like
+on GitHub. **After merging any PR that touches `backend/` or `deploy/`, the steps below are
+mandatory, not optional** — §5's "Verified in production" claims are only true for whatever
+commit was actually deployed *when that section was written*, not for `main` as it stands
+now. It's entirely possible to merge a fix, believe it's live, and be wrong because nobody
+actually logged in and updated the box.
+
+**Pre-flight — confirm what's actually running before trusting anything in §5:**
+
 ```bash
 ssh root@172.237.146.90
 cd /opt/coordinator
+git log -1          # or: git status
+```
+
+Compare that commit against `main`'s current `HEAD` on GitHub. If they don't match, treat
+§5's verification results as describing that old commit, not `main`.
+
+**Redeploy:**
+
+```bash
 git pull origin <branch>
 docker compose up -d --build        # never `down -v`
 curl -s https://172-237-146-90.sslip.io/health
