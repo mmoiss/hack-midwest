@@ -4,3 +4,8 @@ __pycache__/
 *.db-shm
 *.db-wal
 .env
+
+# Live, agent-facing working copy of demo-repo-template/ — must stay its own
+# independent git repo (hooks/reset.sh run `git diff`/`git reset --hard`
+# inside it), so it's never tracked by this outer repo at all.
+/demo-repo/
