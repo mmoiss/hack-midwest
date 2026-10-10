@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 /*
- * Event contract (backend -> dashboard over WebSocket). Every message is
+ * Event contract (server.ts -> dashboard over SSE). Every message is
  *   { type, data, ts }
  *
  * snapshot         { agents[], files[], claims[], proposals[], alerts[], events[] }
@@ -15,8 +15,6 @@ import { create } from 'zustand'
  * alert.add        { id, type, severity, agents[], files[], message, suggestion }
  * alert.resolve    { id }
  */
-
-const API = import.meta.env.VITE_API_URL ?? ''
 
 const initial = {
   agents: {},
@@ -81,37 +79,42 @@ function reduce(s, { type, data = {}, ts = Date.now() }) {
   return next
 }
 
+// Agents get a color from this palette in registration order; the backend's color is ignored
+// so the UI stays on one warm, tame scheme.
+export const PALETTE = ['#c8794a', '#7a9a6e', '#6a86a3', '#b0655c', '#8f8a5a', '#9a7b5a']
+export const agentColor = (agents, id) => PALETTE[Object.keys(agents).indexOf(id) % PALETTE.length] ?? '#b3b0a8'
+
+const savedTheme = () => {
+  try { return localStorage.getItem('theme') } catch { return null }
+}
+
 export const useStore = create((set) => ({
   ...initial,
+  theme: savedTheme() ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
+  toggleTheme: () =>
+    set((s) => {
+      const theme = s.theme === 'dark' ? 'light' : 'dark'
+      try { localStorage.setItem('theme', theme) } catch {}
+      return { theme }
+    }),
   connection: 'connecting',
   tab: 'changes',
   selectedProposal: null,
   selectedFile: null,
   hoveredAgent: null,
   lastAlert: null,
-  mock: false, // true while placeholder data is shown
 
   apply: (msg) => set((s) => reduce(s, msg)),
   setConnection: (connection) => set({ connection }),
-  setMock: (mock) => set({ mock }),
   setTab: (tab) => set({ tab }),
   selectProposal: (id) => set((s) => ({ selectedProposal: s.selectedProposal === id ? null : id })),
   selectFile: (path) => set({ selectedFile: path }),
   hoverAgent: (id) => set({ hoveredAgent: id }),
 
-  // Human decisions go to the backend, which broadcasts the resulting event
-  // back to every dashboard.
-  decideProposal: (id, status) => send(`/api/proposals/${id}`, { status }),
-  resolveAlert: (id) => send(`/api/alerts/${id}/resolve`, {}),
+  // ponytail: not wired yet. Needs a Python route (the only SQLite writer) that logs the decision as an event.
+  decideProposal: (id, status) => console.warn('decideProposal not provisioned', id, status),
+  resolveAlert: (id) => console.warn('resolveAlert not provisioned', id),
 }))
-
-async function send(path, body) {
-  try {
-    await fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  } catch (e) {
-    console.error('POST failed', path, e)
-  }
-}
 
 // Derived helpers
 export const openAlerts = (s) => s.alerts.filter((a) => a.status === 'open')

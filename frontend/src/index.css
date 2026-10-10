@@ -1,10 +1,70 @@
-u@import "tailwindcss";
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Two palettes, one set of semantic tokens. Components only ever use the token names. */
+:root {
+  --canvas: #ffffff;
+  --surface: #f5f4f1;
+  --line: #e4e2dd;
+  --fg: #2b2a27;
+  --muted: #7a776f;
+  --faint: #b3b0a8;
+  --ink: #2b2a27;
+  --ink-fg: #ffffff;
+  --ok: #5f8a66;
+  --warn: #b8743f;
+  --danger: #b5473f;
+  --ok-soft: #eef3ee;
+  --warn-soft: #f7efe6;
+  --danger-soft: #f8ecea;
+}
+.dark {
+  --canvas: #262624;
+  --surface: #30302e;
+  --line: #3d3b38;
+  --fg: #eeece6;
+  --muted: #9b9892;
+  --faint: #6b6965;
+  --ink: #eeece6;
+  --ink-fg: #262624;
+  --ok: #8fb894;
+  --warn: #d4956a;
+  --danger: #d9776f;
+  --ok-soft: #2d3a2f;
+  --warn-soft: #3f332a;
+  --danger-soft: #3f2d2b;
+}
+
+@theme inline {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-line: var(--line);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-ink: var(--ink);
+  --color-ink-fg: var(--ink-fg);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger-soft: var(--danger-soft);
+}
 
 html, body, #root { height: 100%; }
-body { color: #e4e4e7; font-family: ui-sans-serif, system-ui, sans-serif; }
+body { @apply bg-canvas font-sans text-fg antialiased; }
 
 .react-flow__attribution { display: none; }
 .react-flow__handle { opacity: 0; }
+.react-flow__controls, .react-flow__minimap { @apply overflow-hidden rounded-xl border border-line shadow-sm; }
+.react-flow__controls-button { @apply border-line bg-canvas text-fg; }
+.react-flow__controls-button:hover { @apply bg-surface; }
+.react-flow__controls-button svg { fill: currentColor; }
+.react-flow__minimap { @apply bg-canvas; }
 
 @keyframes flash { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
 .animate-flash { animation: flash .8s ease-in-out infinite; }

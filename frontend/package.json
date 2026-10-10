@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "server": "node --env-file-if-exists=.env server.ts",
     "build": "vite build",
     "preview": "vite preview"
   },

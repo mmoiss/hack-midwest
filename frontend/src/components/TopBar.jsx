@@ -1,38 +1,26 @@
-import { useStore, openAlerts, pendingProposals } from '../store'
-
-const CONN = {
-  live: ['LIVE', 'bg-emerald-500'],
-  mock: ['PLACEHOLDER DATA', 'bg-amber-400'],
-  connecting: ['CONNECTING', 'bg-zinc-400 animate-pulse'],
-  offline: ['OFFLINE', 'bg-red-500 animate-pulse'],
-}
+import { useStore } from '../store'
 
 export default function TopBar() {
-  const s = useStore()
-  const [label, dot] = CONN[s.mock ? 'mock' : s.connection]
-  const alerts = openAlerts(s).length
-  const stats = [
-    ['Agents', Object.values(s.agents).filter((a) => a.status !== 'idle').length + '/' + Object.keys(s.agents).length],
-    ['Claims', s.claims.length],
-    ['Pending', pendingProposals(s).length],
-    ['Alerts', alerts, alerts > 0 && 'text-red-400'],
-  ]
+  const { theme, toggleTheme } = useStore()
   return (
-    <header className="flex h-12 shrink-0 items-center gap-6 border-b border-zinc-800 bg-zinc-900 px-4">
-      <div className="font-semibold tracking-wide">
-        <span className="text-cyan-400">◉</span> Mission Control
-      </div>
-      <div className="flex items-center gap-2 rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs font-medium">
-        <span className={`h-2 w-2 rounded-full ${dot}`} /> {label}
-      </div>
-      <div className="ml-auto flex gap-6 text-sm">
-        {stats.map(([k, v, cls]) => (
-          <div key={k} className="flex items-baseline gap-1.5">
-            <span className="text-xs uppercase text-zinc-500">{k}</span>
-            <span className={`font-mono font-semibold ${cls || ''}`}>{v}</span>
-          </div>
-        ))}
-      </div>
+    <header className="flex h-12 shrink-0 items-center border-b border-line px-5">
+      <span className="text-[15px] font-semibold tracking-tight">Mission Control</span>
+      <button
+        onClick={toggleTheme}
+        title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
+        className="ml-auto flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface hover:text-fg"
+      >
+        {theme === 'dark' ? (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+          </svg>
+        ) : (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+          </svg>
+        )}
+      </button>
     </header>
   )
 }

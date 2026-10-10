@@ -69,7 +69,7 @@ The full schema is at the top of `src/store.js`.
 
 The backend applies each decision, then broadcasts the resulting event, so every open dashboard stays in sync.
 
-**Colors:** the backend assigns each agent a color when it registers. Use one of these, in order: `#22d3ee #a78bfa #f472b6 #facc15 #4ade80 #fb923c`.
+**Colors:** the dashboard assigns each agent a color from its own warm palette in registration order (`PALETTE` in `store.js`) and ignores the backend's `color` field, so the scheme stays consistent no matter what tokens are configured.
 
 **Diffs:** proposals send the full `before` and `after` text, and the frontend computes the diff. This means the backend never has to produce unified diffs.
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { ReactFlow, Background, Controls, MiniMap, Handle, Position, useNodesState, useReactFlow } from '@xyflow/react'
-import { useStore } from '../store'
+import { useStore, agentColor } from '../store'
 
 const COL = 230
 const ROW = 58
@@ -30,7 +30,7 @@ function layoutTree(files) {
       y = (Math.min(...ys) + Math.max(...ys)) / 2
     }
     nodes.push({ id: n.id, type: n.isFile ? 'file' : 'dir', position: { x: depth * COL, y }, data: { name: n.name } })
-    if (parent) edges.push({ id: `t:${parent}->${n.id}`, source: parent, target: n.id, type: 'smoothstep', style: { stroke: '#3f3f46' } })
+    if (parent) edges.push({ id: `t:${parent}->${n.id}`, source: parent, target: n.id, type: 'smoothstep', style: { stroke: 'var(--line)' } })
     return y
   }
   walk(root, 0, null)
@@ -39,9 +39,9 @@ function layoutTree(files) {
 
 function DirNode({ data }) {
   return (
-    <div className="rounded px-2 py-1 font-mono text-xs text-zinc-400" style={{ opacity: data.dim ? 0.3 : 1 }}>
+    <div className="rounded-lg bg-surface px-2.5 py-1 font-mono text-xs text-muted" style={{ opacity: data.dim ? 0.3 : 1 }}>
       <Handle type="target" position={Position.Left} />
-      📁 {data.name}
+      {data.name}/
       <Handle type="source" position={Position.Right} />
     </div>
   )
@@ -49,10 +49,10 @@ function DirNode({ data }) {
 
 function FileNode({ data }) {
   const { name, claimants, touching, alert, dim, selected } = data
-  const ring = alert === 'collision' ? 'ring-2 ring-red-500 animate-flash' : alert === 'drift' ? 'ring-2 ring-amber-400 animate-flash' : selected ? 'ring-1 ring-zinc-400' : ''
+  const ring = alert === 'collision' ? 'ring-2 ring-danger animate-flash' : alert === 'drift' ? 'ring-2 ring-warn animate-flash' : selected ? 'ring-2 ring-faint' : ''
   return (
     <div
-      className={`relative w-48 overflow-hidden rounded-md border border-zinc-700 bg-zinc-900 font-mono text-xs transition-opacity ${ring}`}
+      className={`relative w-48 overflow-hidden rounded-xl border border-line bg-canvas font-mono text-xs shadow-sm transition-opacity ${ring}`}
       style={{ opacity: dim ? 0.25 : 1 }}
     >
       <Handle type="target" position={Position.Left} />
@@ -60,15 +60,15 @@ function FileNode({ data }) {
       <div className="absolute inset-y-0 left-0 flex">
         {claimants.map((c) => <div key={c} className="w-1.5" style={{ background: c }} />)}
       </div>
-      <div className="flex items-center gap-1 py-2 pr-2" style={{ paddingLeft: 8 + claimants.length * 6 }}>
-        <span className="truncate text-zinc-200">{name}</span>
+      <div className="flex items-center gap-1 py-2 pr-2" style={{ paddingLeft: 10 + claimants.length * 6 }}>
+        <span className="truncate">{name}</span>
         <div className="ml-auto flex -space-x-1">
           {touching.map((a) => (
             <span
               key={a.id}
               title={`${a.name} editing`}
-              className="flex h-5 w-5 animate-pulse items-center justify-center rounded-full text-[10px] font-bold text-zinc-950 ring-2 ring-zinc-900"
-              style={{ background: a.color }}
+              className="flex h-5 w-5 animate-pulse items-center justify-center rounded-full font-sans text-[10px] font-semibold text-white ring-2 ring-canvas"
+              style={{ background: agentColor(agents, a.id) }}
             >
               {a.name[0]}
             </span>
@@ -76,8 +76,8 @@ function FileNode({ data }) {
         </div>
       </div>
       {alert && (
-        <div className={`px-2 pb-1 text-[10px] font-semibold uppercase ${alert === 'collision' ? 'text-red-400' : 'text-amber-400'}`}>
-          ⚠ {alert}
+        <div className={`px-2.5 pb-1.5 font-sans text-[10px] font-medium ${alert === 'collision' ? 'text-danger' : 'text-warn'}`}>
+          {alert}
         </div>
       )}
       <Handle type="source" position={Position.Right} />
@@ -88,7 +88,7 @@ function FileNode({ data }) {
 const nodeTypes = { file: FileNode, dir: DirNode }
 
 export default function CodebaseMap() {
-  const { files, agents, claims, alerts, hoveredAgent, selectedFile, selectFile, connection } = useStore()
+  const { files, agents, claims, alerts, hoveredAgent, selectedFile, selectFile, theme } = useStore()
   const { fitView } = useReactFlow()
   const fileKey = files.map((f) => f.path).join('|')
   const tree = useMemo(() => layoutTree(files), [fileKey]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -111,7 +111,7 @@ export default function CodebaseMap() {
     const dim = !!hoveredAgent && (base.type === 'dir' || !involved)
     return {
       ...base.data,
-      claimants: cl.map((c) => agents[c.agentId]?.color ?? '#71717a'),
+      claimants: cl.map((c) => agentColor(agents, c.agentId)),
       touching,
       alert,
       dim,
@@ -130,17 +130,13 @@ export default function CodebaseMap() {
         source: d,
         target: f.path,
         animated: hot,
-        style: { stroke: hot ? '#fbbf24' : '#52525b', strokeDasharray: hot ? undefined : '4 4', strokeWidth: hot ? 2 : 1 },
+        style: { stroke: hot ? 'var(--warn)' : 'var(--line)', strokeDasharray: hot ? undefined : '4 4', strokeWidth: hot ? 2 : 1 },
       }
     }),
   )
 
   if (!files.length) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-zinc-500">
-        {connection === 'live' ? 'Connected. Waiting for the backend to send files…' : 'Waiting for backend on /ws…'}
-      </div>
-    )
+    return <div className="flex h-full items-center justify-center text-sm text-faint">Waiting for files</div>
   }
 
   return (
@@ -151,13 +147,13 @@ export default function CodebaseMap() {
       onNodesChange={onNodesChange}
       onNodeClick={(_, n) => n.type === 'file' && selectFile(n.id)}
       onPaneClick={() => selectFile(null)}
-      colorMode="dark"
+      colorMode={theme}
       minZoom={0.2}
       fitView
     >
-      <Background color="#27272a" gap={24} />
+      <Background color="var(--line)" gap={24} />
       <Controls showInteractive={false} />
-      <MiniMap pannable zoomable nodeColor={(n) => (n.data.alert ? '#ef4444' : n.data.claimants?.[0] ?? '#3f3f46')} maskColor="rgba(9,9,11,.7)" />
+      <MiniMap pannable zoomable nodeColor={(n) => (n.data.alert ? 'var(--danger)' : n.data.claimants?.[0] ?? 'var(--line)')} maskColor="color-mix(in srgb, var(--surface) 75%, transparent)" />
     </ReactFlow>
   )
 }
