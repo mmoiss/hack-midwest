@@ -244,3 +244,30 @@ demo to its starting state:
 ```bash
 docker compose exec app python backend/seed.py
 ```
+
+**Last confirmed run of this checklist: 2026-10-10, closing out #15.** The box was found
+sitting on `feat/wire-coordinator-to-events`@`bc99688` — 9 commits behind `main`, missing
+`f8a7621` (the `seed.py` `DB_PATH` fix). That's not a hypothetical: it meant a seed run on
+the box as it stood would have silently written to the wrong file, leaving `spec` empty, and
+per `CONTRACT.md` an empty `spec` table means drift can never fire. Brought current:
+
+```
+git checkout main && git pull origin main   # -> 8670226
+docker compose up -d --build
+docker compose exec app python backend/seed.py
+curl -s https://172-237-146-90.sslip.io/health   # "events": 12 -- matches seed.py's row count exactly
+```
+
+Then re-ran the actual drift smoke test against the now-current server — a real `/events`
+POST (not a fixture) removing `email` from `backend/api/users.py`, judged by the real
+Akamai `hackathon-chat` model:
+
+```
+(13, alice, edit,      {"file": "backend/api/users.py", "diff": "... -\"email\": user.email, ..."})
+(14, coordinator, alert, {"summary": "The GET /users/{id} response no longer includes the required \"email\" field...",
+                          "affected": ["frontend/src/api/client.ts", "bob"], "suggested_fix": "Restore the \"email\": user.email entry..."})
+```
+
+Correct on every count: `client.ts` has no claim so it fell back to its path, `bob` resolved
+from his claim on `UserCard.tsx`, and the model correctly caught the break. `main`@`8670226`
+is confirmed working end to end on the live server, not just on a branch or a local fixture.
