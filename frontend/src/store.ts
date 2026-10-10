@@ -34,7 +34,7 @@ export type FeedEvent = { id: string; type: string; data: any; ts: number }
 export type Msg = { type: string; data?: any; ts?: number }
 export type Theme = 'light' | 'dark'
 export type Connection = 'connecting' | 'live' | 'offline'
-export type Tab = 'changes' | 'alerts' | 'feed'
+export type Page = 'overview' | 'agent' | 'changes' | 'alerts' | 'feed' | 'map'
 
 type Data = {
   agents: Record<string, Agent>
@@ -48,15 +48,20 @@ type Data = {
 
 export type State = Data & {
   theme: Theme
+  project: string
+  projects: string[]
+  setProject: (p: string) => void
   connection: Connection
-  tab: Tab
+  page: Page
+  selectedAgent: string | null
   selectedProposal: string | null
   selectedFile: string | null
   hoveredAgent: string | null
   toggleTheme: () => void
   apply: (msg: Msg) => void
   setConnection: (c: Connection) => void
-  setTab: (t: Tab) => void
+  setPage: (p: Page) => void
+  openAgent: (id: string) => void
   selectProposal: (id: string) => void
   selectFile: (path: string | null) => void
   hoverAgent: (id: string | null) => void
@@ -146,15 +151,21 @@ export const useStore = create<State>()((set) => ({
       try { localStorage.setItem('theme', theme) } catch {}
       return { theme }
     }),
+  // ponytail: projects are a stub until the backend knows about more than one repo.
+  project: 'mmoiss/hack-midwest',
+  projects: ['mmoiss/hack-midwest'],
+  setProject: (project) => set({ project }),
   connection: 'connecting',
-  tab: 'changes',
+  page: 'overview',
+  selectedAgent: null,
   selectedProposal: null,
   selectedFile: null,
   hoveredAgent: null,
 
   apply: (msg) => set((s) => reduce(s, msg)),
   setConnection: (connection) => set({ connection }),
-  setTab: (tab) => set({ tab }),
+  setPage: (page) => set({ page }),
+  openAgent: (selectedAgent) => set({ page: 'agent', selectedAgent }),
   selectProposal: (id) => set((s) => ({ selectedProposal: s.selectedProposal === id ? null : id })),
   selectFile: (path) => set({ selectedFile: path }),
   hoverAgent: (id) => set({ hoveredAgent: id }),

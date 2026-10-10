@@ -35,10 +35,11 @@ npm run dev                      # connects to FastAPI on localhost:8000 via the
 | Feature | Where | Status |
 |---|---|---|
 | Codebase map (tree layout, deps, drag, minimap) | `src/components/CodebaseMap.tsx` | ✅ |
-| Agent colors (stripes, markers, hover spotlight) | `AgentPanel.tsx`, `CodebaseMap.tsx` | ✅ |
-| Proposed changes tab with a diff for each change | `RightPanel.tsx` → `Changes`, `Diff` | ✅ |
-| Collision and drift signals (rings, banner, cards) | `CodebaseMap.tsx`, `AlertBanner.tsx`, `RightPanel.tsx` → `Alerts` | ✅ |
-| Live event feed | `RightPanel.tsx` → `Feed` | ✅ |
+| Agent colors (stripes, markers, hover spotlight) | `Sidebar.tsx`, `AgentPage.tsx`, `CodebaseMap.tsx` | ✅ |
+| Proposed changes page with a diff for each change | `Lists.tsx` → `Changes`, `Diff` | ✅ |
+| Collision and drift signals (rings, banner, cards) | `CodebaseMap.tsx`, `AlertBanner.tsx`, `Lists.tsx` → `Alerts` | ✅ |
+| Live event feed | `Lists.tsx` → `Feed` | ✅ |
+| Sidebar navigation and overview landing page | `Sidebar.tsx`, `Overview.tsx` | ✅ |
 | WebSocket client with reconnect | `src/ws.js` | ✅ |
 | State + event reducer | `src/store.ts` | ✅ |
 
