@@ -9,25 +9,38 @@
 # }
 
 {$DOMAIN} {
-	# `app` is the compose service name; Docker's internal DNS resolves it. Caddy
-	# terminates TLS here and speaks plain HTTP to the app over the private network.
-	reverse_proxy app:8000
-}
+	# `app` and `dashboard` are compose service names; Docker's internal DNS resolves
+	# them. Caddy terminates TLS here and speaks plain HTTP over the private network.
 
-# Track D adds the dashboard when it hands off. It becomes the catch-all and the MCP
-# paths stay routed to app, per CONTRACT.md:
-#
-# {$DOMAIN} {
-# 	handle /mcp* {
-# 		reverse_proxy app:8000
-# 	}
-# 	handle /events {
-# 		reverse_proxy app:8000
-# 	}
-# 	handle /health {
-# 		reverse_proxy app:8000
-# 	}
-# 	handle {
-# 		reverse_proxy dashboard:3000
-# 	}
-# }
+	# The Python server owns these three paths.
+	handle /mcp* {
+		reverse_proxy app:8000
+	}
+	handle /events {
+		reverse_proxy app:8000
+	}
+	handle /health {
+		reverse_proxy app:8000
+	}
+
+	# The dashboard's Server-Sent Events feed — the only route server.ts serves.
+	handle /api/stream {
+		reverse_proxy dashboard:3001 {
+			# SSE must not be buffered: -1 flushes every write straight through, so
+			# events reach the browser as they happen instead of pooling until the
+			# response ends (which, for a stream, is never).
+			flush_interval -1
+		}
+	}
+
+	# Everything else is the built React app, served off disk by Caddy.
+	# server.ts deliberately does not serve static files — it 404s anything that is not
+	# /api/stream — so nothing would answer here without this block.
+	handle {
+		root * /srv/dashboard
+		# SPA fallback: unknown paths return index.html so client-side routing works
+		# instead of 404ing on a refresh.
+		try_files {path} /index.html
+		file_server
+	}
+}

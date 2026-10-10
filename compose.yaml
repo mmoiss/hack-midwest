@@ -21,6 +21,31 @@ services:
     # No `ports:` on purpose. Port 8000 stays on the internal Docker network where only
     # caddy can reach it, which is the same thing the Cloud Firewall says from outside.
 
+  dashboard:
+    # server.ts imports only node builtins (node:http, node:sqlite, node:url), so there is
+    # nothing to install and no image to build — the stock Node image runs it directly.
+    # Node 24 because `node:sqlite` was flag-gated before it, and running a .ts file
+    # without a compile step needs 23.6+.
+    image: node:24-slim
+    working_dir: /app/frontend
+    command: ["node", "server.ts"]
+    environment:
+      # The same token table backend/mcp.py reads — server.ts uses it to colour agents.
+      TEAM_TOKENS: ${TEAM_TOKENS:?missing TEAM_TOKENS — copy .env.example to .env}
+      # Must be the exact file the backend writes to, or the dashboard renders an empty
+      # page while the server looks perfectly healthy.
+      DB_PATH: /app/data/coordinator.db
+      PORT: "3001"
+    volumes:
+      - ./frontend:/app/frontend:ro
+      # Read-WRITE on purpose, even though server.ts opens SQLite with readOnly: true.
+      # A WAL database still needs its readers to touch the -shm file, so a :ro mount
+      # fails with SQLITE_READONLY_DIRECTORY — and WAL is exactly what lets the dashboard
+      # read while Python writes.
+      - ./data:/app/data
+    restart: unless-stopped
+    # No `ports:` — same as app. Only caddy is public.
+
   caddy:
     image: caddy:2
     ports: ["80:80", "443:443"]
@@ -30,11 +55,15 @@ services:
       DOMAIN: ${DOMAIN:?missing DOMAIN — copy .env.example to .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The built React app, served straight off disk. Must exist before caddy starts —
+      # run the build step in SETUP.md first, or Docker creates an empty directory here
+      # and every page 404s.
+      - ./frontend/dist:/srv/dashboard:ro
       # Persists issued certificates. Without this every redeploy re-requests a cert and
       # walks into Let's Encrypt's rate limit.
       - caddy_data:/data
       - caddy_config:/config
-    depends_on: [app]
+    depends_on: [app, dashboard]
     restart: unless-stopped
 
 volumes:
