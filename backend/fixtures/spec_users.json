@@ -1,0 +1,6 @@
+{
+    "contract": "GET /users/{id}",
+    "owner": "backend/api/users.py",
+    "consumers": ["frontend/src/api/client.ts", "frontend/src/components/UserCard.tsx"],
+    "shape": {"id": "int", "name": "string", "email": "string"}
+}

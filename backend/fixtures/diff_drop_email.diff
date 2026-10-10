@@ -1,0 +1,8 @@
+--- a/backend/api/users.py
++++ b/backend/api/users.py
+@@ -8,7 +8,6 @@ def get_user(user_id: int):
+     return jsonify({
+         "id": user.id,
+         "name": user.name,
+-        "email": user.email,
+     })
