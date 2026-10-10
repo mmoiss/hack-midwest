@@ -90,7 +90,7 @@ CREATE TABLE events (
 | Inference | `OPENAI_BASE_URL=https://ws.akamai-workshops.com/v1`, model alias `hackathon-chat`, team key as bearer token, kept in `.env` on the VM only | Only the coordinator calls this. The four MCP tools above are plain Python — no model involved. |
 | Rate limits | 60 requests/min and 100,000 chat tokens/min, shared across the whole team | The deterministic filter (does this file own a contract?) and debounce run *before* any model call, so routine edits never touch the quota. |
 | State | SQLite file on a bind-mounted volume, WAL mode on | No managed Postgres, no Object Storage, no Valkey — all three exist in the workshop stack for document RAG, which this project doesn't do. WAL mode is what lets the dashboard's Node server read while Python writes. |
-| Deploy mechanics | Adapt `scripts/deploy_linode.sh`: create/reuse VM + firewall by label, wait for SSH + cloud-init, copy code + `.env` over SSH, `docker compose up --build`, poll `/health` | Already written and working in the reference repo — retarget it, don't rewrite it. |
+| Deploy mechanics | Manual, over SSH: create the VM + firewall in Cloud Manager, clone the repo via a read-only deploy key, write `.env` on the VM, `docker compose up -d --build`, seed, check `/health`. `SETUP.md` §4 covers a from-scratch VM; `INTEGRATION.md` §6 covers redeploying the existing one | There is no deploy script — the server was stood up by hand, and those two sections are the source of truth. |
 | Health check | `GET /health` reporting inference connectivity + DB status | Same pattern as the workshop's `agent/server.py` — built to be opened live in front of judges. |
 
 ## Coordinator boundary
@@ -134,4 +134,4 @@ Not `python backend/mcp.py`. The script form puts `backend/` at the front of `sy
 7. Build the deterministic filter + debounce as the first thing `/events` calls after logging the edit.
 8. Smoke-test the Akamai inference connection in isolation before the coordinator depends on it.
 9. Containerize: `Dockerfile`, `compose.yaml` with `app` + `dashboard` + `caddy`, cloud-init unchanged.
-10. Settle the hostname now — DNS propagation is the one step with latency nobody controls.
+10. Settle the hostname now — DNS propagation is the one step with latency nobody controls. *Settled: `DOMAIN` is an sslip.io name, which needs no DNS record (`SETUP.md` §4.4).*
