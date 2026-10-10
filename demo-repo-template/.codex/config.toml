@@ -1,0 +1,6 @@
+[mcp_servers.team_coordinator]
+url = "http://localhost:8000/mcp"
+bearer_token_env_var = "CODEX_TEAM_TOKEN"
+
+[features]
+hooks = true
