@@ -208,3 +208,27 @@ In any project folder, `.mcp.json`:
 `/mcp` with **no trailing slash** — `/mcp/` returns `307` and not every client follows it.
 `/mcp` in Claude Code should list four tools; asking the agent to call `declare_intent`
 should come back attributed to whoever owns that token, not to any name the agent supplied.
+
+## 5. Running the server and dashboard together on one laptop
+
+This is the offline fallback SPEC.md calls for if venue wifi fails, and it's also how you'd
+rehearse the dashboard locally before a Linode box exists. Two processes, run from the repo
+root and `frontend/` respectively:
+
+```bash
+python -m backend.mcp        # from the repo root
+```
+```bash
+npm run server                # from frontend/
+```
+
+**Both must agree on where `coordinator.db` is.** With no `DB_PATH` set anywhere, they now
+default to the same file (`<repo-root>/coordinator.db`) — fixed as part of #13; previously
+the dashboard defaulted to a different, nonexistent path and would silently show nothing
+while the server worked fine. If you do set `DB_PATH` (for either `.env`), set it to the
+same value in both — see the comments in `.env.example` and `frontend/.env.example`.
+
+To confirm it's actually wired up: run `python backend/seed.py` once, then open the
+dashboard (`npm run dev` in `frontend/`) and confirm the seeded agents/claims appear. An
+empty dashboard with a server that starts cleanly is the exact symptom of a `DB_PATH`
+mismatch, not a crash you'd notice otherwise.
