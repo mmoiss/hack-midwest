@@ -1,87 +1,93 @@
 import { useEffect, useMemo } from 'react'
-import { ReactFlow, Background, Controls, MiniMap, Handle, Position, useNodesState, useReactFlow, type Node, type Edge, type NodeProps } from '@xyflow/react'
-import { useStore, agentColor, type FileEntry } from '../store'
+import { ReactFlow, Background, Controls, MiniMap, Panel, Handle, Position, useNodesState, useReactFlow, type Node, type Edge, type NodeProps } from '@xyflow/react'
+import { useStore, agentColor, alertTargets, type FileEntry } from '../store'
 
-const COL = 230
-const ROW = 58
+const COL = 290
+const ROW = 84
+const TOP = 56
 
-type TreeNode = { id: string; name: string; isFile: boolean; children: Map<string, TreeNode> }
-type NodeData = { name: string; claimants: string[]; touching: { id: string; name: string; color: string }[]; alert: 'collision' | 'drift' | null; dim: boolean; selected: boolean }
-type MapNode = Node<NodeData, 'file' | 'dir'>
+type FileData = {
+  base: string; dir: string; tint: string | null; border: string | null; owner: boolean; drift: boolean
+  touching: { id: string; name: string; color: string }[]; dim: boolean; selected: boolean
+}
+type LabelData = { label: string }
+type MapNode = Node<FileData, 'file'> | Node<LabelData, 'label'>
 
-// Turn flat file paths into a left-to-right tree layout.
-function layoutTree(files: FileEntry[]) {
-  const root: TreeNode = { id: 'd:', name: 'repo', isFile: false, children: new Map() }
+function layers(files: FileEntry[]) {
+  const deps = new Map(files.map((f) => [f.path, f.deps]))
+  const memo = new Map<string, number>()
+  const depth = (p: string, seen = new Set<string>()): number => {
+    if (memo.has(p)) return memo.get(p)!
+    if (seen.has(p)) return 0
+    seen.add(p)
+    const d = (deps.get(p) ?? []).filter((x) => deps.has(x))
+    const v = d.length ? 1 + Math.max(...d.map((x) => depth(x, seen))) : 0
+    memo.set(p, v)
+    return v
+  }
+  return new Map(files.map((f) => [f.path, depth(f.path)]))
+}
+
+function layoutColumns(files: FileEntry[]) {
+  const layer = layers(files)
+  const groups = new Map<string, FileEntry[]>()
   for (const f of files) {
-    let node = root
-    const parts = f.path.split('/')
-    parts.forEach((part, i) => {
-      const path = parts.slice(0, i + 1).join('/')
-      const isFile = i === parts.length - 1
-      if (!node.children.has(part)) node.children.set(part, { id: isFile ? path : `d:${path}`, name: part, isFile, children: new Map() })
-      node = node.children.get(part)!
-    })
+    const top = f.path.includes('/') ? f.path.split('/')[0] : '/'
+    groups.set(top, [...(groups.get(top) ?? []), f])
   }
-  const nodes: MapNode[] = []
-  const edges: Edge[] = []
-  let row = 0
-  const walk = (n: TreeNode, depth: number, parent: string | null): number => {
-    const kids = [...n.children.values()].sort((a, b) => Number(a.isFile) - Number(b.isFile) || a.name.localeCompare(b.name))
-    let y: number
-    if (!kids.length) y = row++ * ROW
-    else {
-      const ys = kids.map((k) => walk(k, depth + 1, n.id))
-      y = (Math.min(...ys) + Math.max(...ys)) / 2
-    }
-    nodes.push({ id: n.id, type: n.isFile ? 'file' : 'dir', position: { x: depth * COL, y }, data: { name: n.name, claimants: [], touching: [], alert: null, dim: false, selected: false } })
-    if (parent) edges.push({ id: `t:${parent}->${n.id}`, source: parent, target: n.id, type: 'smoothstep', style: { stroke: 'var(--line)' } })
-    return y
-  }
-  walk(root, 0, null)
-  return { nodes, edges }
-}
-
-function DirNode({ data }: NodeProps<MapNode>) {
-  return (
-    <div className="rounded-lg bg-surface px-2.5 py-1 font-mono text-xs text-muted" style={{ opacity: data.dim ? 0.3 : 1 }}>
-      <Handle type="target" position={Position.Left} />
-      {data.name}/
-      <Handle type="source" position={Position.Right} />
-    </div>
+  const cols = [...groups].sort(
+    ([a, fa], [b, fb]) => Math.min(...fa.map((f) => layer.get(f.path)!)) - Math.min(...fb.map((f) => layer.get(f.path)!)) || a.localeCompare(b),
   )
+  const nodes: MapNode[] = []
+  cols.forEach(([top, list], c) => {
+    nodes.push({ id: `label:${top}`, type: 'label', position: { x: c * COL, y: 0 }, data: { label: top }, draggable: false, selectable: false })
+    list
+      .sort((a, b) => layer.get(a.path)! - layer.get(b.path)! || a.path.localeCompare(b.path))
+      .forEach((f, i) => {
+        const parts = f.path.split('/')
+        const dir = parts.slice(top === '/' ? 0 : 1, -1).join('/')
+        nodes.push({
+          id: f.path,
+          type: 'file',
+          position: { x: c * COL, y: TOP + i * ROW },
+          data: { base: parts.at(-1)!, dir: dir ? `${dir}/` : '', tint: null, border: null, owner: false, drift: false, touching: [], dim: false, selected: false },
+        })
+      })
+  })
+  return nodes
 }
 
-function FileNode({ data }: NodeProps<MapNode>) {
-  const { name, claimants, touching, alert, dim, selected } = data
-  const ring = alert === 'collision' ? 'ring-2 ring-danger animate-flash' : alert === 'drift' ? 'ring-2 ring-warn animate-flash' : selected ? 'ring-2 ring-faint' : ''
+function LabelNode({ data }: NodeProps<Node<LabelData, 'label'>>) {
+  return <div className="text-[11px] font-semibold tracking-wider text-faint uppercase">{data.label}</div>
+}
+
+function FileNode({ data }: NodeProps<Node<FileData, 'file'>>) {
+  const { base, dir, tint, border, owner, touching, dim, selected } = data
   return (
     <div
-      className={`relative w-48 overflow-hidden rounded-xl border border-line bg-canvas font-mono text-xs shadow-sm transition-opacity ${ring}`}
-      style={{ opacity: dim ? 0.25 : 1 }}
+      className="relative w-48 rounded-lg px-2.5 py-1.5 font-mono text-xs transition-opacity"
+      style={{
+        background: tint ?? 'var(--canvas)',
+        border: owner ? '2px solid var(--warn)' : `1px solid ${border ?? 'var(--line)'}`,
+        boxShadow: selected ? '0 0 0 2px var(--faint)' : undefined,
+        opacity: dim ? 0.25 : 1,
+      }}
     >
       <Handle type="target" position={Position.Left} />
-      {/* One color stripe per claiming agent */}
-      <div className="absolute inset-y-0 left-0 flex">
-        {claimants.map((c) => <div key={c} className="w-1.5" style={{ background: c }} />)}
-      </div>
-      <div className="flex items-center gap-1 py-2 pr-2" style={{ paddingLeft: 10 + claimants.length * 6 }}>
-        <span className="truncate">{name}</span>
-        <div className="ml-auto flex -space-x-1">
+      <div className="truncate font-medium">{base}</div>
+      <div className="truncate text-[11px] text-faint">{dir || ' '}</div>
+      {touching.length > 0 && (
+        <div className="absolute -top-2.5 -right-2.5 flex -space-x-1">
           {touching.map((a) => (
             <span
               key={a.id}
               title={`${a.name} editing`}
-              className="flex h-5 w-5 animate-pulse items-center justify-center rounded-full font-sans text-[10px] font-semibold text-white ring-2 ring-canvas"
+              className="flex h-6 w-6 items-center justify-center rounded-full font-sans text-[10px] font-semibold text-white ring-2 ring-canvas"
               style={{ background: a.color }}
             >
-              {a.name[0]}
+              {a.name[0]?.toUpperCase()}
             </span>
           ))}
-        </div>
-      </div>
-      {alert && (
-        <div className="px-2.5 pb-1.5 font-sans text-[10px] font-medium text-muted">
-          {alert}
         </div>
       )}
       <Handle type="source" position={Position.Right} />
@@ -89,56 +95,57 @@ function FileNode({ data }: NodeProps<MapNode>) {
   )
 }
 
-const nodeTypes = { file: FileNode, dir: DirNode }
+const nodeTypes = { file: FileNode, label: LabelNode }
 
 export default function CodebaseMap() {
-  const { files, agents, claims, alerts, hoveredAgent, selectedFile, selectFile, theme } = useStore()
+  const s = useStore()
+  const { files, agents, claims, alerts, hoveredAgent, selectedFile, selectFile, theme } = s
   const { fitView } = useReactFlow()
-  const fileKey = files.map((f) => f.path).join('|')
-  const tree = useMemo(() => layoutTree(files), [fileKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const fileKey = files.map((f) => `${f.path}<${f.deps.join(',')}`).join('|')
+  const layout = useMemo(() => layoutColumns(files), [fileKey]) // eslint-disable-line react-hooks/exhaustive-deps
   const [nodes, setNodes, onNodesChange] = useNodesState<MapNode>([])
 
   // Re-layout only when the file set changes (keeps user drags otherwise).
   useEffect(() => {
-    setNodes(tree.nodes)
+    setNodes(layout)
     setTimeout(() => fitView({ padding: 0.15, duration: 400 }), 50)
-  }, [tree, setNodes, fitView])
+  }, [layout, setNodes, fitView])
 
   // Live state -> node data.
   const open = alerts.filter((a) => a.status === 'open')
-  const dataFor = (id: string, base: MapNode): NodeData => {
-    const cl = claims.filter((c) => c.path === id)
+  const driftFiles = new Set(open.flatMap((a) => alertTargets(s, a).files))
+  const dependents = new Set(files.flatMap((f) => f.deps))
+  const liveNodes = nodes.map((n): MapNode => {
+    if (n.type !== 'file') return n
+    const cl = claims.filter((c) => c.path === n.id)
+    const color = cl[0] ? agentColor(agents, cl[0].agentId) : null
     const touching = Object.values(agents)
-      .filter((a) => a.currentFile === id)
+      .filter((a) => a.currentFile === n.id)
       .map((a) => ({ id: a.id, name: a.name, color: agentColor(agents, a.id) }))
-    const hit = open.filter((a) => a.files.includes(id))
-    const alert: NodeData['alert'] = hit.some((a) => a.type === 'collision') ? 'collision' : hit.length ? 'drift' : null
     const involved = cl.some((c) => c.agentId === hoveredAgent) || touching.some((a) => a.id === hoveredAgent)
-    const dim = !!hoveredAgent && (base.type === 'dir' || !involved)
+    const drift = driftFiles.has(n.id)
     return {
-      ...base.data,
-      claimants: cl.map((c) => agentColor(agents, c.agentId)),
-      touching,
-      alert,
-      dim,
-      selected: id === selectedFile,
+      ...n,
+      data: {
+        ...n.data,
+        tint: color && `${color}2e`,
+        border: color,
+        owner: drift && dependents.has(n.id),
+        drift,
+        touching,
+        dim: !!hoveredAgent && !involved,
+        selected: n.id === selectedFile,
+      },
     }
-  }
-  const liveNodes = nodes.map((n) => ({ ...n, data: dataFor(n.id, n) }))
+  })
 
-  // Dependency edges; light up the ones on a drift path.
-  const driftFiles = new Set(open.filter((a) => a.type === 'drift').flatMap((a) => a.files))
   const depEdges: Edge[] = files.flatMap((f) =>
-    f.deps.map((d) => {
-      const hot = driftFiles.has(f.path) && driftFiles.has(d)
-      return {
-        id: `dep:${f.path}->${d}`,
-        source: d,
-        target: f.path,
-        animated: hot,
-        style: { stroke: hot ? 'var(--warn)' : 'var(--line)', strokeDasharray: hot ? undefined : '4 4', strokeWidth: hot ? 2 : 1 },
-      }
-    }),
+    f.deps.map((d) => ({
+      id: `dep:${d}->${f.path}`,
+      source: d,
+      target: f.path,
+      style: { stroke: 'var(--faint)', strokeWidth: 1.25 },
+    })),
   )
 
   if (!files.length) {
@@ -146,12 +153,13 @@ export default function CodebaseMap() {
   }
 
   const fileClaims = claims.filter((c) => c.path === selectedFile)
-  const fileAlerts = open.filter((a) => selectedFile && a.files.includes(selectedFile))
+  const fileAlerts = open.filter((a) => selectedFile && alertTargets(s, a).files.includes(selectedFile))
+  const legend = Object.values(agents).filter((a) => claims.some((c) => c.agentId === a.id) || a.currentFile)
 
   return (
     <ReactFlow
       nodes={liveNodes}
-      edges={[...tree.edges, ...depEdges]}
+      edges={depEdges}
       nodeTypes={nodeTypes}
       onNodesChange={onNodesChange}
       onNodeClick={(_, n) => n.type === 'file' && selectFile(n.id)}
@@ -162,7 +170,27 @@ export default function CodebaseMap() {
     >
       <Background color="var(--line)" gap={24} />
       <Controls showInteractive={false} />
-      <MiniMap<MapNode> pannable zoomable nodeColor={(n) => (n.data.alert ? 'var(--danger)' : n.data.claimants[0] ?? 'var(--line)')} maskColor="color-mix(in srgb, var(--surface) 75%, transparent)" />
+      <MiniMap<MapNode>
+        pannable
+        zoomable
+        nodeColor={(n) => (n.type !== 'file' ? 'transparent' : n.data.drift ? 'var(--danger)' : n.data.border ?? 'var(--line)')}
+        maskColor="color-mix(in srgb, var(--surface) 75%, transparent)"
+      />
+      <Panel position="top-right">
+        <div className="flex max-w-xs flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl border border-line bg-canvas px-3 py-2 text-xs text-muted shadow-sm">
+          {legend.map((a) => (
+            <span key={a.id} className="flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded-sm" style={{ background: `${agentColor(agents, a.id)}2e`, border: `1px solid ${agentColor(agents, a.id)}` }} />
+              {a.name}
+            </span>
+          ))}
+          <span className="flex items-center gap-1.5">
+            <span className="h-3 w-3 rounded-sm border-2 border-warn" />
+            Owns a drifting contract
+          </span>
+          <span className="w-full text-faint">Shaded = claimed - initial = editing now</span>
+        </div>
+      </Panel>
       {selectedFile && (
         <div className="absolute top-4 left-4 z-10 w-72 rounded-xl border border-line bg-canvas p-4 text-xs shadow-lg">
           <div className="mb-2 font-mono break-all">{selectedFile}</div>
@@ -173,7 +201,7 @@ export default function CodebaseMap() {
             </div>
           ))}
           {fileAlerts.map((a) => (
-            <div key={a.id} className="mt-1 font-medium">{a.type}</div>
+            <div key={a.id} className="mt-1 text-danger">{a.message}</div>
           ))}
           {!fileClaims.length && !fileAlerts.length && <div className="text-faint">Unclaimed</div>}
         </div>
