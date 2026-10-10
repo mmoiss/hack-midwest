@@ -1,0 +1,42 @@
+services:
+  app:
+    build: .
+    environment:
+      # The `:?` form fails the command with a clear message instead of starting a server
+      # that rejects every token or a Caddy with no hostname to secure.
+      TEAM_TOKENS: ${TEAM_TOKENS:?missing TEAM_TOKENS — copy .env.example to .env}
+      DB_PATH: /app/data/coordinator.db
+      # backend/coordinator.py reads its OWN env var and defaults to ./coordinator.db.
+      # Left unset it would write alerts to /app/coordinator.db while the server reads
+      # /app/data/coordinator.db — every alert would land in a file nothing queries.
+      COORDINATOR_DB_PATH: /app/data/coordinator.db
+      # Model selection for the coordinator. Only read once it is wired into /events.
+      COORDINATOR_MODEL_PROVIDER: ${COORDINATOR_MODEL_PROVIDER:-akamai}
+      AKAMAI_TEAM_KEY: ${AKAMAI_TEAM_KEY:-}
+      AKAMAI_BASE_URL: ${AKAMAI_BASE_URL:-https://ws.akamai-workshops.com/v1}
+    volumes:
+      # Bind mount, so the database survives `docker compose down` and a rebuild.
+      - ./data:/app/data
+    restart: unless-stopped
+    # No `ports:` on purpose. Port 8000 stays on the internal Docker network where only
+    # caddy can reach it, which is the same thing the Cloud Firewall says from outside.
+
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    environment:
+      # Substituted into the Caddyfile as {$DOMAIN}, so the hostname is one line in .env
+      # and swapping sslip.io for a real domain never touches a config file.
+      DOMAIN: ${DOMAIN:?missing DOMAIN — copy .env.example to .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Persists issued certificates. Without this every redeploy re-requests a cert and
+      # walks into Let's Encrypt's rate limit.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [app]
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

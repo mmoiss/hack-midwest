@@ -80,7 +80,7 @@ function FileNode({ data }: NodeProps<MapNode>) {
         </div>
       </div>
       {alert && (
-        <div className={`px-2.5 pb-1.5 font-sans text-[10px] font-medium ${alert === 'collision' ? 'text-danger' : 'text-warn'}`}>
+        <div className="px-2.5 pb-1.5 font-sans text-[10px] font-medium text-muted">
           {alert}
         </div>
       )}
@@ -145,6 +145,9 @@ export default function CodebaseMap() {
     return <div className="flex h-full items-center justify-center text-sm text-faint">Waiting for files</div>
   }
 
+  const fileClaims = claims.filter((c) => c.path === selectedFile)
+  const fileAlerts = open.filter((a) => selectedFile && a.files.includes(selectedFile))
+
   return (
     <ReactFlow
       nodes={liveNodes}
@@ -160,6 +163,21 @@ export default function CodebaseMap() {
       <Background color="var(--line)" gap={24} />
       <Controls showInteractive={false} />
       <MiniMap<MapNode> pannable zoomable nodeColor={(n) => (n.data.alert ? 'var(--danger)' : n.data.claimants[0] ?? 'var(--line)')} maskColor="color-mix(in srgb, var(--surface) 75%, transparent)" />
+      {selectedFile && (
+        <div className="absolute top-4 left-4 z-10 w-72 rounded-xl border border-line bg-canvas p-4 text-xs shadow-lg">
+          <div className="mb-2 font-mono break-all">{selectedFile}</div>
+          {fileClaims.map((c) => (
+            <div key={c.agentId} className="mb-1">
+              <span className="font-medium">{agents[c.agentId]?.name}</span>
+              <span className="text-muted">: {c.intent}</span>
+            </div>
+          ))}
+          {fileAlerts.map((a) => (
+            <div key={a.id} className="mt-1 font-medium">{a.type}</div>
+          ))}
+          {!fileClaims.length && !fileAlerts.length && <div className="text-faint">Unclaimed</div>}
+        </div>
+      )}
     </ReactFlow>
   )
 }

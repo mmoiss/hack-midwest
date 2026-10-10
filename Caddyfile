@@ -1,0 +1,33 @@
+# While you are still getting compose to come up, uncomment this block to use Let's
+# Encrypt's STAGING CA. Certs are untrusted (browsers warn, curl needs -k) but issuance
+# is effectively unlimited. Production issuance is rate limited per hostname, and burning
+# it locks this name out of new certs for a week — which you do not want to discover at
+# 6 AM. Comment it back out for the real demo, then `docker compose restart caddy`.
+#
+# {
+# 	acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+# }
+
+{$DOMAIN} {
+	# `app` is the compose service name; Docker's internal DNS resolves it. Caddy
+	# terminates TLS here and speaks plain HTTP to the app over the private network.
+	reverse_proxy app:8000
+}
+
+# Track D adds the dashboard when it hands off. It becomes the catch-all and the MCP
+# paths stay routed to app, per CONTRACT.md:
+#
+# {$DOMAIN} {
+# 	handle /mcp* {
+# 		reverse_proxy app:8000
+# 	}
+# 	handle /events {
+# 		reverse_proxy app:8000
+# 	}
+# 	handle /health {
+# 		reverse_proxy app:8000
+# 	}
+# 	handle {
+# 		reverse_proxy dashboard:3000
+# 	}
+# }

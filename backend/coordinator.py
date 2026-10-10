@@ -1,34 +1,43 @@
 """The Strands agent that judges contract drift.
 
 Given one edit to a file that owns a contract, decide whether the edit still
-satisfies the agreed shape for that contract's consumers. Context (diff, spec
-entry, consumers) is assembled by the caller and handed over in a single
-prompt -- this module never calls a tool to go fetch more of it. See
-SPEC.md's "Coordinator" section and CONTRACT.md for the shapes this plugs
-into.
+satisfies the agreed shape for that contract's consumers. Context (diff and
+the one spec entry the file owns) is assembled by the caller and handed over
+in a single prompt -- this module never calls a tool to go fetch more of it.
+See SPEC.md's "Coordinator" section and CONTRACT.md for the shapes this
+plugs into.
 
 Invocation contract (proposed, confirm with Track A before relying on it):
-    run_coordinator(diff: str, spec_entry: dict, consumers: list[str]) -> None
+    run_coordinator(diff: str, spec_entry: dict) -> None
 """
 
 import json
 import os
 import sqlite3
 
+import truststore
+
+truststore.inject_into_ssl()  # trust the OS certificate store (needed behind a TLS-inspecting proxy)
+
+from dotenv import load_dotenv
 from pydantic import BaseModel
 from strands import Agent, tool
 from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent
 from strands.models.openai import OpenAIModel
 
+load_dotenv()
+
 DB_PATH = os.environ.get("COORDINATOR_DB_PATH", "coordinator.db")
 
 SYSTEM_PROMPT = """You review one code edit against one API contract a team has agreed on.
-You get the diff, the contract's agreed shape, and the files that consume it.
-Decide only this: does the diff still satisfy the shape for every consumer listed?
+You get the diff, the contract's agreed shape, and the teammates affected if it breaks.
+Decide only this: does the diff still satisfy the shape for every consumer of this contract?
 
 If it does, say so in one short sentence and call no tool.
 If it breaks the shape for a consumer, call raise_alert with a one-sentence
-summary, the affected consumer file(s), and a concrete suggested fix.
+summary, `affected` set to EXACTLY the teammate names listed below (never a
+file path -- those names are already resolved for you), and a concrete
+suggested fix.
 If the situation needs a human decision instead of a clear verdict (for
 example, the edit looks like a deliberate contract change), call
 escalate_to_human with the question.
@@ -58,6 +67,15 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             payload TEXT NOT NULL
         )"""
     )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS claims (
+            agent TEXT NOT NULL,
+            file TEXT NOT NULL,
+            summary TEXT,
+            claimed_at TEXT NOT NULL,
+            PRIMARY KEY (agent, file)
+        )"""
+    )
 
 
 def _log_event(agent_name: str, event_type: str, payload: dict) -> None:
@@ -71,13 +89,53 @@ def _log_event(agent_name: str, event_type: str, payload: dict) -> None:
     conn.close()
 
 
+def _resolve_affected_agents(consumer_files: list[str]) -> list[str]:
+    """Map consumer files to the teammate(s) who've claimed them.
+
+    This is the literal lookup SPEC.md means by "who is affected is a
+    lookup, not a reasoning step" -- resolved here in plain Python against
+    the `claims` table before the model ever runs, not something the model
+    is asked to guess at from a file path. CONTRACT.md's wire format and
+    mcp.py's check_conflicts (`if agent in alert["affected"]`) both require
+    `affected` to hold teammate names, not file paths -- this is what
+    produces those names.
+
+    Falls back to the raw file path if nobody has claimed it yet (e.g.
+    drift caught before declare_intent was called), so an alert is still
+    useful rather than silently empty.
+    """
+    if not consumer_files:
+        return []
+    conn = sqlite3.connect(DB_PATH)
+    _ensure_schema(conn)
+    placeholders = ",".join("?" for _ in consumer_files)
+    rows = conn.execute(
+        f"SELECT agent, file FROM claims WHERE file IN ({placeholders})", consumer_files
+    ).fetchall()
+    conn.close()
+
+    by_file: dict[str, list[str]] = {}
+    for agent, file in rows:
+        by_file.setdefault(file, []).append(agent)
+
+    seen: set[str] = set()
+    resolved: list[str] = []
+    for f in consumer_files:
+        for name in by_file.get(f, [f]):
+            if name not in seen:
+                seen.add(name)
+                resolved.append(name)
+    return resolved
+
+
 @tool
 def raise_alert(summary: str, affected: list[str], suggested_fix: str) -> str:
-    """Flag that this edit broke the contract for one or more consumers.
+    """Flag that this edit broke the contract for one or more teammates.
 
     Args:
         summary: Plain-language, one-sentence explanation of what broke.
-        affected: The consumer file(s) that need to react.
+        affected: The teammate name(s) that need to react -- use exactly the
+            names given in the prompt, never a file path.
         suggested_fix: A concrete suggestion for how to adapt.
     """
     _log_event(
@@ -104,7 +162,8 @@ def _build_model():
 
     Swapping providers is changing this one function -- same Agent, same
     tools, same hooks -- which is the actual answer to SPEC.md's risk
-    mitigation ("if Akamai's tool calling is flaky, switch to Bedrock").
+    mitigation ("if Akamai's tool calling is flaky, switch to Bedrock or a
+    stronger model").
     """
     provider = os.environ.get("COORDINATOR_MODEL_PROVIDER", "akamai")
 
@@ -114,8 +173,17 @@ def _build_model():
                 "api_key": os.environ["AKAMAI_TEAM_KEY"],
                 "base_url": os.environ.get("AKAMAI_BASE_URL", "https://ws.akamai-workshops.com/v1"),
             },
-            model_id="hackathon-chat",
+            model_id=os.environ.get("AKAMAI_CHAT_MODEL", "hackathon-chat"),
             params={"max_tokens": 300},
+        )
+
+    if provider == "bedrock":
+        from strands.models.bedrock import BedrockModel
+
+        return BedrockModel(
+            region_name=os.environ.get("AWS_REGION", "us-west-2"),
+            model_id=os.environ.get("BEDROCK_MODEL_ID", "global.anthropic.claude-sonnet-4-6"),
+            max_tokens=300,
         )
 
     if provider == "anthropic":
@@ -145,12 +213,12 @@ def _build_model():
     raise ValueError(f"Unknown COORDINATOR_MODEL_PROVIDER: {provider!r}")
 
 
-def _build_prompt(diff: str, spec_entry: dict, consumers: list[str]) -> str:
+def _build_prompt(diff: str, spec_entry: dict, affected_agents: list[str]) -> str:
     return (
         f"Contract: {spec_entry['contract']}\n"
         f"Owner file: {spec_entry['owner']}\n"
         f"Agreed shape: {json.dumps(spec_entry['shape'])}\n"
-        f"Consumers: {consumers}\n\n"
+        f"Teammates affected if this contract breaks: {affected_agents}\n\n"
         f"Diff:\n{diff}\n"
     )
 
@@ -172,14 +240,20 @@ def _trace(event: BeforeToolCallEvent | AfterToolCallEvent, called: list[str]) -
         print(f"[coordinator] <- {event.tool_use['name']} finished ({event.result['status']})")
 
 
-def run_coordinator(diff: str, spec_entry: dict, consumers: list[str], *, structured: bool = False) -> None:
+def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False) -> None:
     """Judge one edit. Call this once per debounced burst of saves to a contract-owning file.
+
+    spec_entry is the one row from the `spec` table this file owns --
+    {contract, owner, consumers, shape}. `consumers` (file paths) is resolved
+    here against the `claims` table into teammate names before the model
+    ever sees it, so the caller doesn't need to do that lookup itself.
 
     structured=True uses the Pydantic structured-output fallback instead of
     tool calling -- same two outcomes, same events written, for when
     hackathon-chat's tool calling turns out unreliable.
     """
-    prompt = _build_prompt(diff, spec_entry, consumers)
+    affected_agents = _resolve_affected_agents(spec_entry["consumers"])
+    prompt = _build_prompt(diff, spec_entry, affected_agents)
 
     if structured:
         agent = Agent(model=_build_model(), system_prompt=SYSTEM_PROMPT)
