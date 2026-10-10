@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "team-coordinator": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp",
+      "headers": {
+        "Authorization": "Bearer ${CLAUDE_TEAM_TOKEN}"
+      }
+    }
+  }
+}
