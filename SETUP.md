@@ -37,7 +37,9 @@ If that fails, edit both hook commands (`python3 hooks/report_edit.py ...` → `
 
 ## 3. The live drift-catch rehearsal is blocked on `/events` being real
 
-The hook pipeline (`demo-repo-template/hooks/report_edit.py`) is built and verified against a local mock server that always returns `{"alerts": []}` — it has never been run against the real coordinator, because the Server track hasn't built the `/events` custom route yet (confirmed: `backend/mcp.py` currently only implements the four MCP tools, no `/events` route).
+**Update:** hook-firing itself is now confirmed live, against the real installed CLIs, not just by invoking the script directly. Ran a headless `claude -p` session and a headless `codex exec --dangerously-bypass-hook-trust` session, each against a mock server returning one real test alert (a verification token, not an empty `{"alerts": []}`), and had each agent quote back whatever alert text it received. Both did, verbatim — confirming `PostToolUse` fires on both CLIs and `hookSpecificOutput.additionalContext` reaches both agents' context (this was previously unconfirmed for Codex specifically). `CODEX_OUTPUT_MODE` can stay on its `json` default; no fallback to plain-text needed.
+
+What's still unverified is everything downstream of the hook: the hook pipeline has only been run against a local mock server that always returns `{"alerts": []}` (or, for this test, one fixed fake alert) — it has never been run against the real coordinator, because the Server track hasn't built the `/events` custom route yet (confirmed: `backend/mcp.py` currently only implements the four MCP tools, no `/events` route).
 
 **Do not treat a clean mock-server run as a rehearsal of the actual pitch moment.** The mock server can only confirm "the hook fires and posts a diff" — it cannot confirm the coordinator actually catches the `email`-removal drift, or that the dashboard shows it. That full chain needs, in order:
 
