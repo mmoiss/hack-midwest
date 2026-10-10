@@ -1,25 +1,65 @@
+"""Team Agent Coordinator — MCP tools, the /events hook route, and shared SQLite state.
+
+Run from the REPO ROOT as a module, never as a script:
+
+    python -m backend.mcp
+
+Running `python backend/mcp.py` puts backend/ at the front of sys.path, so this file
+shadows the installed `mcp` package that fastmcp imports internally, and fastmcp dies
+with "No module named 'mcp.server'; 'mcp' is not a package". The -m form keeps the repo
+root on sys.path instead, so the real package wins.
+"""
+
 import json
 import os
 import sqlite3
+import time
 
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 mcp = FastMCP("TeamAgentCoordinator")
-DB_PATH = "coordinator.db"
+
+# Points at the bind-mounted volume in the container so the database survives a redeploy;
+# falls back to the working directory for local runs. See compose.yaml.
+DB_PATH = os.environ.get("DB_PATH", "coordinator.db")
 
 # token -> {"name": ..., "color": ...}, e.g. TEAM_TOKENS='{"tok_abc": {"name": "alice", "color": "#e06c75"}}'
 TEAM_TOKENS: dict = json.loads(os.environ.get("TEAM_TOKENS", "{}"))
+
+# A burst of saves to one file should cost one coordinator call, not one per save.
+# In-memory on purpose: a restart forgetting this is harmless.
+DEBOUNCE_SECONDS = 5
+_last_seen: dict[str, float] = {}
 
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    # Per-connection, unlike journal_mode, so it has to be set on every connection
+    # rather than once in init_db(). Without it a concurrent write fails instead of waiting.
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
+def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
+    """Add a column if a database created before it already exists on disk or on the VM."""
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 def init_db():
+    parent = os.path.dirname(DB_PATH)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
     conn = get_db()
+    # Stored in the database file, so every later connection inherits it. This is what lets
+    # the dashboard's TypeScript server poll `events` while Python is writing to it.
+    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("""
         CREATE TABLE IF NOT EXISTS spec (
             contract TEXT PRIMARY KEY,
@@ -43,21 +83,34 @@ def init_db():
             ts TEXT NOT NULL DEFAULT (datetime('now')),
             agent TEXT NOT NULL,
             type TEXT NOT NULL,
-            payload TEXT NOT NULL
+            payload TEXT NOT NULL,
+            delivered_to TEXT NOT NULL DEFAULT '[]'
         )
     """)
+    _ensure_column(conn, "events", "delivered_to", "delivered_to TEXT NOT NULL DEFAULT '[]'")
     conn.commit()
     conn.close()
 
 
-def caller_identity() -> tuple[str, str]:
-    """Resolve the calling agent's name and color from its bearer token. Never trust a caller-supplied name."""
-    headers = get_http_headers(include={"authorization"})
-    token = headers.get("authorization", "").removeprefix("Bearer ").strip()
+def resolve_identity(token: str) -> tuple[str, str]:
+    """Map a bearer token to (name, color). The only place the token table is read."""
     identity = TEAM_TOKENS.get(token)
     if not identity:
         raise ValueError("Unknown or missing bearer token.")
     return identity["name"], identity["color"]
+
+
+def _bearer(header_value: str) -> str:
+    return header_value.removeprefix("Bearer ").strip()
+
+
+def caller_identity() -> tuple[str, str]:
+    """Identity for MCP tool calls, which reach their headers through FastMCP's context.
+
+    Never trust a caller-supplied name — the token is the identity.
+    """
+    headers = get_http_headers(include={"authorization"})
+    return resolve_identity(_bearer(headers.get("authorization", "")))
 
 
 def log_event(agent: str, event_type: str, payload: dict) -> None:
@@ -68,6 +121,72 @@ def log_event(agent: str, event_type: str, payload: dict) -> None:
     )
     conn.commit()
     conn.close()
+
+
+def should_run_coordinator(file: str) -> bool:
+    """Debounce: at most one coordinator call per file per DEBOUNCE_SECONDS.
+
+    Runs before any model call, so routine edits never touch the team's shared
+    60-requests-per-minute quota.
+    """
+    now = time.monotonic()
+    last = _last_seen.get(file)
+    _last_seen[file] = now
+    # `last is None` rather than a 0.0 default: time.monotonic() counts from an arbitrary
+    # origin, so on a freshly booted VM `now` can be smaller than DEBOUNCE_SECONDS and a
+    # 0.0 default would swallow the very first edit to a file.
+    return last is None or (now - last) > DEBOUNCE_SECONDS
+
+
+def judge_edit(diff: str, spec_entry: sqlite3.Row, agent: str) -> None:
+    """Decide whether this edit breaks the contract `spec_entry` describes.
+
+    FROZEN SIGNATURE — Track C replaces this body in place and nothing else here changes.
+    In-process rather than a sibling service, so there is exactly one SQLite writer and no
+    cross-process lock contention.
+
+    A real implementation logs a `type="alert"` row (which fetch_undelivered_alerts then
+    hands to each affected agent) or leaves the clean row below.
+    """
+    log_event(agent, "checked_clean", {"file": spec_entry["owner"]})
+
+
+def fetch_undelivered_alerts(agent: str) -> list[dict]:
+    """Alerts naming this agent that it has not been handed yet, marked as handed over.
+
+    Delivery is tracked per agent rather than as one global flag: `affected` is a list, and
+    a single boolean would mean the first agent to call /events consumed the alert for
+    everyone else named in it. This is the only channel back into a running agent, so a
+    dropped alert is a silently broken demo.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, payload, delivered_to FROM events WHERE type = 'alert' ORDER BY id"
+    ).fetchall()
+
+    pending = []
+    for row in rows:
+        payload = json.loads(row["payload"])
+        delivered_to = json.loads(row["delivered_to"])
+        if agent in payload.get("affected", []) and agent not in delivered_to:
+            pending.append((row["id"], payload, delivered_to))
+
+    for event_id, _, delivered_to in pending:
+        conn.execute(
+            "UPDATE events SET delivered_to = ? WHERE id = ?",
+            (json.dumps(delivered_to + [agent]), event_id),
+        )
+    conn.commit()
+    conn.close()
+
+    return [
+        {
+            "summary": payload.get("summary", ""),
+            "affected": payload.get("affected", []),
+            "suggested_fix": payload.get("suggested_fix", ""),
+        }
+        for _, payload, _ in pending
+    ]
 
 
 @mcp.tool()
@@ -133,6 +252,87 @@ def propose_spec_change(entry: str, change: str, reason: str) -> str:
     agent, _ = caller_identity()
     log_event(agent, "propose_spec_change", {"entry": entry, "change": change, "reason": reason})
     return f"Proposal for {entry} logged. Waiting on a human to accept it before the spec changes."
+
+
+@mcp.custom_route("/events", methods=["POST"])
+async def handle_events(request: Request) -> JSONResponse:
+    """The PostToolUse hook endpoint: report an edit, get back any alerts waiting for you.
+
+    A plain Starlette route rather than an MCP tool, so a hook script can reach it with
+    curl whatever the agent decides to do. Headers come straight off the request —
+    get_http_headers() is for tool calls and has no request context here.
+    """
+    try:
+        agent, _ = resolve_identity(_bearer(request.headers.get("authorization", "")))
+    except ValueError:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "body must be JSON"}, status_code=400)
+
+    file = body.get("file")
+    diff = body.get("diff", "")
+    if not isinstance(file, str) or not file:
+        return JSONResponse({"error": "field 'file' is required"}, status_code=400)
+
+    # The hook also sends an "agent" field; it is ignored on purpose. The token decides who
+    # you are, so an agent cannot report an edit as someone else.
+    log_event(agent, "edit", {"file": file, "diff": diff})
+
+    conn = get_db()
+    owner_row = conn.execute("SELECT * FROM spec WHERE owner = ?", (file,)).fetchone()
+    conn.close()
+
+    # The deterministic filter: only a file that owns a contract is worth a model call.
+    if owner_row is not None and should_run_coordinator(file):
+        judge_edit(diff, owner_row, agent)
+
+    return JSONResponse({"alerts": fetch_undelivered_alerts(agent)})
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def handle_health(request: Request) -> JSONResponse:
+    """Unauthenticated so the deploy script can poll it and it can be opened in front of judges."""
+    db_ok = False
+    journal_mode = None
+    event_count = None
+    try:
+        conn = get_db()
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        event_count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        conn.close()
+        db_ok = True
+    except sqlite3.Error:
+        pass
+
+    # backend/coordinator.py selects its provider from this and reads that provider's key.
+    provider = os.environ.get("COORDINATOR_MODEL_PROVIDER", "akamai")
+    key_var = {
+        "akamai": "AKAMAI_TEAM_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+    }.get(provider)
+
+    return JSONResponse(
+        {
+            "status": "ok" if db_ok else "degraded",
+            "db": {
+                "ok": db_ok,
+                "path": DB_PATH,
+                "journal_mode": journal_mode,
+                "events": event_count,
+            },
+            "inference": {
+                "provider": provider,
+                # ollama takes no key, so no key_var means there is nothing to configure.
+                "configured": key_var is None or bool(os.environ.get(key_var)),
+            },
+            "tokens_loaded": len(TEAM_TOKENS),
+        },
+        status_code=200 if db_ok else 503,
+    )
 
 
 if __name__ == "__main__":

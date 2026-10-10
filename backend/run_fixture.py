@@ -1,9 +1,13 @@
 """Run the coordinator against a hand-written fixture.
 
 No live /events, no demo repo, no Akamai account required if
-COORDINATOR_MODEL_PROVIDER is set to a stand-in (anthropic/openai/ollama).
+COORDINATOR_MODEL_PROVIDER is set to a stand-in (anthropic/openai/ollama/bedrock).
 Writes to coordinator_fixture.db by default so it never touches the real
 server's database.
+
+Seeds one claim (bob on UserCard.tsx, matching backend/seed.py's real demo
+data) so run_coordinator's claims-table lookup has something to resolve --
+otherwise `affected` would fall back to the raw consumer file path.
 
 Usage:
     python backend/run_fixture.py drop_email
@@ -20,7 +24,7 @@ from pathlib import Path
 os.environ.setdefault("COORDINATOR_DB_PATH", "coordinator_fixture.db")
 
 sys.path.insert(0, str(Path(__file__).parent))
-from coordinator import DB_PATH, run_coordinator  # noqa: E402
+from coordinator import DB_PATH, _ensure_schema, run_coordinator  # noqa: E402
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -30,11 +34,26 @@ CASES = {
 }
 
 
+def seed_claims() -> None:
+    claims = json.loads((FIXTURES / "claims.json").read_text())
+    conn = sqlite3.connect(DB_PATH)
+    _ensure_schema(conn)
+    conn.execute("DELETE FROM claims")
+    conn.executemany(
+        "INSERT INTO claims (agent, file, summary, claimed_at) VALUES (?, ?, ?, datetime('now'))",
+        [(c["agent"], c["file"], c["summary"]) for c in claims],
+    )
+    conn.commit()
+    conn.close()
+
+
 def main(case: str, structured: bool) -> None:
+    seed_claims()
+
     diff = (FIXTURES / CASES[case]).read_text()
     spec_entry = json.loads((FIXTURES / "spec_users.json").read_text())
 
-    run_coordinator(diff, spec_entry, spec_entry["consumers"], structured=structured)
+    run_coordinator(diff, spec_entry, structured=structured)
 
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute("SELECT id, ts, agent, type, payload FROM events ORDER BY id DESC LIMIT 5").fetchall()
