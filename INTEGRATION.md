@@ -1,0 +1,227 @@
+# Integration notes — the server track, and how the other tracks plug into it
+
+Written by the Server track (Track A) after deploying to Akamai and wiring the coordinator
+in. This is the context you need to join your work to the live server without rediscovering
+things the hard way. `CONTRACT.md` is still the authority on interfaces; this file is the
+*operational* layer — what is actually running, what was verified, and the traps that cost
+time.
+
+**No secrets in this file.** Bearer tokens and the Akamai key live only in `.env` on the VM.
+
+---
+
+## 1. What is live right now
+
+```
+https://172-237-146-90.sslip.io
+```
+
+| Path | Method | Purpose |
+|---|---|---|
+| `/mcp` | POST | MCP streamable-HTTP transport — the four tools |
+| `/events` | POST | the `PostToolUse` hook endpoint |
+| `/health` | GET | status, unauthenticated, safe to open in front of judges |
+
+**`/mcp` takes no trailing slash.** `/mcp/` answers `307` and some clients will not follow
+the redirect. The server's own startup banner prints the canonical path if you ever need to
+re-confirm it.
+
+Running on one Linode (`g6-standard-1`, Ubuntu 24.04, Chicago `us-ord`), two containers:
+`app` (FastMCP + SQLite) and `caddy` (TLS). The app publishes **no ports** — Caddy reaches it
+over Docker's internal network, so port 8000 is not exposed to the internet at all.
+
+### The hostname has no DNS record
+
+`172-237-146-90.sslip.io` resolves because **sslip.io reads the IP out of the name** and
+returns it. Nothing was registered and nothing propagates. It is a real public name, so
+Let's Encrypt issues a genuinely trusted certificate for it — verified, issuer
+`Let's Encrypt CN=YE2`.
+
+If the VM is ever rebuilt with a different IP, the hostname changes with it: put the new
+`<ip-with-dashes>.sslip.io` in `.env` as `DOMAIN` and restart. No config file changes —
+the `Caddyfile` reads `{$DOMAIN}`.
+
+---
+
+## 2. Joining your track to it
+
+### Track B — hooks
+
+Point `TEAM_EVENTS_URL` at `https://172-237-146-90.sslip.io/events` and give each agent its
+own bearer token (`CLAUDE_TEAM_TOKEN` / `CODEX_TEAM_TOKEN`). The request shape is unchanged
+from the mock:
+
+```
+POST /events
+Authorization: Bearer <token>
+{ "agent": "codex", "file": "backend/api/users.py", "diff": "<unified diff>" }
+
+→ 200 { "alerts": [ { "summary": str, "affected": [str], "suggested_fix": str } ] }
+```
+
+Two things the mock could not tell you:
+
+- **The `agent` field in the body is ignored.** Identity comes from the token, server-side.
+  Keep sending it if convenient; nothing reads it. An agent cannot report an edit as someone
+  else.
+- **Errors are real now.** Unknown or missing token → `401`. Body that is not JSON, or has no
+  `file` → `400`. The mock always returned 200.
+
+### Track C — the coordinator
+
+`backend/coordinator.py` runs **in-process**, imported by `backend/mcp.py`. One SQLite
+writer, no cross-process lock contention. The seam is `judge_edit` in `mcp.py`:
+
+```python
+judge_edit(diff, spec_entry: sqlite3.Row, agent)   # mcp.py — adapter
+    └── run_coordinator(diff, spec_entry: dict)    # coordinator.py — the Strands agent
+```
+
+`judge_edit` exists to **convert, not delegate**. SQLite stores `consumers` and `shape` as
+JSON *text*; `run_coordinator` needs them parsed — it `json.dumps()` the shape and iterates
+consumers as a list. Passing a raw `sqlite3.Row` straight through would hand it a string
+where a list belongs, and the `IN (...)` query would get one placeholder per character.
+
+`judge_edit` swallows every exception from the coordinator and logs it to the container log.
+`/events` is an agent's only channel for pending alerts, so a missing key, a rate limit or a
+model outage must not turn the hook into a `500`. If the coordinator is misbehaving you will
+see it in `docker compose logs app`, not in a failed hook:
+
+```
+[coordinator] judge_edit failed on <file> (edited by <agent>): <exception>
+```
+
+### Track D — the dashboard
+
+Read the SQLite file directly, as planned. WAL mode is on and verified
+(`/health` reports `journal_mode: wal`), so you can poll `events` while Python writes.
+
+**The `events` table has a column that is not in CONTRACT.md's original schema:**
+
+```sql
+delivered_to TEXT NOT NULL DEFAULT '[]'   -- JSON list of agent names already handed this row
+```
+
+It only means anything on `type = "alert"` rows. Ignore it for display purposes — but do not
+be surprised by it in a `SELECT *`, and do not write to it.
+
+Why per-agent and not a boolean: `affected` is a list. A single `delivered` flag would let
+the first agent to call `/events` consume an alert on behalf of everyone else named in it,
+and `/events` is the only channel back into a running agent, so that alert would simply be
+lost. Verified: an alert affecting alice and bob is delivered to each exactly once,
+independently.
+
+The dashboard service is **not in `compose.yaml` yet** — that is Track D's to add. The
+`Caddyfile` has the routing block for it commented out at the bottom: MCP/hook/health paths
+stay on `app`, everything else goes to `dashboard`.
+
+---
+
+## 3. Decisions worth knowing
+
+**The coordinator runs in-process, not as a sibling service.** One SQLite writer, no lock
+contention, strictly less to build. Recorded in `CONTRACT.md` under "Coordinator boundary".
+
+**`affected` holds teammate names, not file paths.** `_resolve_affected_agents()` maps
+consumer files to whoever claimed them in the `claims` table, in plain Python, before the
+model runs. This is SPEC.md's "who is affected is a lookup, not a reasoning step."
+
+> **Live behaviour worth knowing for the demo:** if a consumer file has **no claim**, the
+> resolver falls back to the raw file path. A real run produced
+> `affected: ["frontend/src/api/client.ts", "bob"]` — bob was notified because he had claimed
+> `UserCard.tsx`; `client.ts` had no claimant so its path came through instead, and no agent
+> matches a path. Have the demo agents call `declare_intent` first and this does not bite.
+
+**The server is started as a module, never as a script.**
+
+```
+python -m backend.mcp      # correct
+python backend/mcp.py      # breaks
+```
+
+The script form puts `backend/` at the front of `sys.path`, where `backend/mcp.py` shadows
+the installed `mcp` package that `fastmcp` imports internally. Startup then dies with
+`No module named 'mcp.server'; 'mcp' is not a package` — and `fastmcp` catches that and
+reports a misleading *"FastMCP server support is not installed"*, which sends you off
+reinstalling a package that was never missing. The `Dockerfile` `CMD` uses `-m`.
+
+**Debounce runs before any model call.** 5 seconds per file, in-memory. A burst of saves
+costs one coordinator call, so routine edits never touch the team's shared 60-req/min quota.
+
+---
+
+## 4. Traps that already cost time
+
+**`down -v` destroys your TLS certificate.** The `caddy_data` volume holds it. Let's Encrypt
+allows roughly five identical certificates per week — burn those and the hostname cannot get
+a new one until the window resets. Always `docker compose down`, never `down -v`.
+
+**`#` in `.env` truncates values.** The teammate colors are hex. Unquoted, an env parser
+reads `#` as a start-of-comment and silently cuts the JSON short. The server then starts
+cleanly and rejects every token, which looks exactly like an auth bug. `make_tokens.py`
+emits the line single-quoted; keep it that way.
+
+**Two different env vars point at the same database.** `backend/mcp.py` reads `DB_PATH`;
+`backend/coordinator.py` reads `COORDINATOR_DB_PATH`. `compose.yaml` sets both to
+`/app/data/coordinator.db`. Leave either unset and the coordinator writes alerts to a file
+nothing reads.
+
+**`seed.py` honours `DB_PATH` now.** It used to hardcode a relative `coordinator.db`, so
+seeding from `/app` wrote `/app/coordinator.db` while the server read the volume. The seed
+reported success, the `spec` table stayed empty, and no edit ever reached the coordinator —
+a silent failure that looks like a broken coordinator. Fixed; `/health` reporting
+`"events": 0` after a seed is the tell if it ever regresses.
+
+**An empty `spec` table means drift can never fire.** `/events` only calls the coordinator
+for files that *own* a contract. Run the seed after any fresh deploy.
+
+---
+
+## 5. Verified, and not
+
+**Verified in production, over the public internet:**
+
+- Real Let's Encrypt certificate, clean TLS verification, `http` → `308` → `https`
+- `/health` 200 with `journal_mode: wal`, `inference.configured: true`, all tokens loaded
+- `/events`: `401` unauthenticated, `400` malformed, `200` with alerts
+- A real drift catch: an agent removed `email` from the contract-owning file, the Akamai
+  `hackathon-chat` model judged it against the stored shape, raised an alert naming the
+  affected teammate with a correct concrete fix, and that alert reached the other agent on
+  its next hook call — then did not repeat
+- MCP transport connected from a second machine, four tools listed, `declare_intent`
+  executed and attributed to the token holder
+- Database survives container destroy/recreate on the mounted volume
+
+**Tool calling works on `hackathon-chat`** — SPEC.md flagged it as unproven. Isolated smoke
+test: plain completion 2.9s, tool call 3.4s, 368 tokens. The structured-output fallback in
+`coordinator.py` is insurance, not a necessity.
+
+**Not verified / known gaps:**
+
+- The Cloud Firewall's inbound policy is still ACCEPT. Nothing listens on ports other than
+  80/443, so there is no exposed service behind it — this is missing defence-in-depth, not an
+  open door. Set the default inbound policy to DROP with ACCEPT rules for 22/80/443 to close
+  it.
+- The dashboard service and its Caddy route are not deployed.
+- `coordinator.py` imports `dotenv` but `python-dotenv` is not declared in
+  `requirements.txt`. It resolves transitively today, so this works — it is one `pip`
+  resolution away from not working.
+
+---
+
+## 6. Redeploying
+
+```bash
+ssh root@172.237.146.90
+cd /opt/coordinator
+git pull origin <branch>
+docker compose up -d --build        # never `down -v`
+curl -s https://172-237-146-90.sslip.io/health
+```
+
+`.env` is gitignored and lives only on the VM, so a pull never disturbs it. To reset the
+demo to its starting state:
+
+```bash
+docker compose exec app python backend/seed.py
+```
