@@ -174,7 +174,7 @@ def _build_model():
                 "base_url": os.environ.get("AKAMAI_BASE_URL", "https://ws.akamai-workshops.com/v1"),
             },
             model_id=os.environ.get("AKAMAI_CHAT_MODEL", "hackathon-chat"),
-            params={"max_tokens": 300},
+            params={"max_tokens": 300, "temperature": 0},
         )
 
     if provider == "bedrock":
