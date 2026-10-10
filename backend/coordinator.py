@@ -25,9 +25,14 @@ from strands import Agent, tool
 from strands.hooks import AfterToolCallEvent, BeforeToolCallEvent
 from strands.models.openai import OpenAIModel
 
+if __package__:
+    from .alert_context import enrich_alert, review_context
+else:  # run_fixture.py also supports importing this module directly.
+    from alert_context import enrich_alert, review_context
+
 load_dotenv()
 
-DB_PATH = os.environ.get("COORDINATOR_DB_PATH", "coordinator.db")
+DB_PATH = os.environ.get("COORDINATOR_DB_PATH", os.environ.get("DB_PATH", "coordinator.db"))
 
 SYSTEM_PROMPT = """You review one code edit against one API contract a team has agreed on.
 You get the diff, the contract's agreed shape, and the teammates affected if it breaks.
@@ -78,9 +83,11 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
     )
 
 
-def _log_event(agent_name: str, event_type: str, payload: dict) -> None:
+def _log_event(agent_name: str, event_type: str, payload: dict, *, context=None) -> None:
     conn = sqlite3.connect(DB_PATH)
     _ensure_schema(conn)
+    if event_type == "alert":
+        payload = enrich_alert(payload, context)
     conn.execute(
         "INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)",
         (agent_name, event_type, json.dumps(payload)),
@@ -128,33 +135,35 @@ def _resolve_affected_agents(consumer_files: list[str]) -> list[str]:
     return resolved
 
 
-@tool
-def raise_alert(summary: str, affected: list[str], suggested_fix: str) -> str:
-    """Flag that this edit broke the contract for one or more teammates.
+def _review_tools(context):
+    # Capture each invocation's context, including when tools run on worker threads.
+    @tool
+    def raise_alert(summary: str, affected: list[str], suggested_fix: str) -> str:
+        """Flag a broken contract for the affected teammates.
 
-    Args:
-        summary: Plain-language, one-sentence explanation of what broke.
-        affected: The teammate name(s) that need to react -- use exactly the
-            names given in the prompt, never a file path.
-        suggested_fix: A concrete suggestion for how to adapt.
-    """
-    _log_event(
-        "coordinator",
-        "alert",
-        {"summary": summary, "affected": affected, "suggested_fix": suggested_fix},
-    )
-    return "Alert raised and logged."
+        Args:
+            summary: One sentence explaining what broke.
+            affected: Exactly the teammate names supplied in the prompt.
+            suggested_fix: A concrete suggestion for how to adapt.
+        """
+        _log_event(
+            "coordinator", "alert",
+            {"summary": summary, "affected": affected, "suggested_fix": suggested_fix},
+            context=context,
+        )
+        return "Alert raised and logged."
 
+    @tool
+    def escalate_to_human(question: str) -> str:
+        """Ask a human to decide something this review cannot resolve.
 
-@tool
-def escalate_to_human(question: str) -> str:
-    """Ask a human to decide something this review can't resolve on its own.
+        Args:
+            question: The decision a human needs to make about this contract.
+        """
+        _log_event("coordinator", "alert", {"question": question, "escalated": True}, context=context)
+        return "Escalated to a human."
 
-    Args:
-        question: The decision a human needs to make.
-    """
-    _log_event("coordinator", "alert", {"question": question, "escalated": True})
-    return "Escalated to a human."
+    return [raise_alert, escalate_to_human]
 
 
 def _build_model():
@@ -240,7 +249,7 @@ def _trace(event: BeforeToolCallEvent | AfterToolCallEvent, called: list[str]) -
         print(f"[coordinator] <- {event.tool_use['name']} finished ({event.result['status']})")
 
 
-def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False) -> None:
+def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False, edit_id: int | None = None) -> None:
     """Judge one edit. Call this once per debounced burst of saves to a contract-owning file.
 
     spec_entry is the one row from the `spec` table this file owns --
@@ -252,7 +261,8 @@ def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False) ->
     tool calling -- same two outcomes, same events written, for when
     hackathon-chat's tool calling turns out unreliable.
     """
-    affected_agents = _resolve_affected_agents(spec_entry["consumers"])
+    context = review_context(spec_entry, edit_id)
+    affected_agents = _resolve_affected_agents(context["consumers"])
     prompt = _build_prompt(diff, spec_entry, affected_agents)
 
     if structured:
@@ -268,13 +278,14 @@ def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False) ->
                     "affected": verdict.affected,
                     "suggested_fix": verdict.suggested_fix,
                 },
+                context=context,
             )
         else:
             _log_event("coordinator", "checked_clean", {"contract": spec_entry["contract"]})
         return
 
     called: list[str] = []
-    agent = Agent(model=_build_model(), tools=[raise_alert, escalate_to_human], system_prompt=SYSTEM_PROMPT)
+    agent = Agent(model=_build_model(), tools=_review_tools(context), system_prompt=SYSTEM_PROMPT)
     agent.add_hook(lambda event: _trace(event, called), [BeforeToolCallEvent, AfterToolCallEvent])
     agent(prompt)
 

@@ -2,9 +2,9 @@
   "mcpServers": {
     "team-coordinator": {
       "type": "http",
-      "url": "http://localhost:8000/mcp",
+      "url": "https://172-237-146-90.sslip.io/mcp",
       "headers": {
-        "Authorization": "Bearer ${CLAUDE_TEAM_TOKEN}"
+        "Authorization": "Bearer tok_t8tO5gpzdhKmFx36eHZ8OQlXv9rNR2SQ"
       }
     }
   }

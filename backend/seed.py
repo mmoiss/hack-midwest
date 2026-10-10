@@ -1,12 +1,15 @@
 ﻿"""Reset coordinator.db to the demo's starting state: fake agents, claims, and events.
 
-Run from backend/: python seed.py
+Run from the repo root: python -m backend.seed
+DB_PATH overrides the default repository-root coordinator.db.
 """
 
 import json
+import os
 import sqlite3
+from pathlib import Path
 
-DB_PATH = "coordinator.db"
+DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).resolve().parent.parent / "coordinator.db"))
 
 # Same schema as mcp.py's init_db (not imported, so seeding doesn't need fastmcp).
 SCHEMA = """
@@ -32,7 +35,7 @@ CLAIMS = [
 
 EVENTS = [
     ("alice", "declare_intent", {"files": ["backend/api/users.py"], "summary": "Return first_name/last_name"}),
-    ("alice", "edit", {"file": "backend/api/users.py", "diff": ""}),
+    ("alice", "edit", {"file": "backend/api/users.py", "diff": '-"name": user.name\n+"first_name": user.first_name\n+"last_name": user.last_name'}),
     ("bob", "check_conflicts", {"files": ["frontend/src/components/UserCard.tsx"]}),
     ("bob", "declare_intent", {"files": ["frontend/src/components/UserCard.tsx"], "summary": "Render user name in card"}),
     ("bob", "get_spec", {"path": "frontend/src/components/UserCard.tsx"}),
@@ -43,15 +46,17 @@ EVENTS = [
         "reason": "Needed for localized greetings.",
     }),
     ("coordinator", "alert", {
+        "contract": "GET /users/{id}",
         "summary": "Bob's UserCard reads `user.name`, which Alice's pending contract change removes.",
         "affected": ["alice", "bob"],
         "suggested_fix": "Notify Bob to render first_name + last_name before merging.",
     }),
-    ("carol", "edit", {"file": "backend/api/users.py", "diff": ""}),
+    ("carol", "edit", {"file": "backend/api/orders.py", "diff": '-return {"orders": orders}\n+return orders'}),
     ("coordinator", "alert", {
-        "summary": "Carol started editing users.py, which Alice has claimed.",
-        "affected": ["alice", "carol"],
-        "suggested_fix": "Carol should wait for Alice, or move the order join into orders.py.",
+        "contract": "GET /orders",
+        "summary": "Carol's orders response removes the orders envelope expected by the Orders page and API client.",
+        "affected": ["carol"],
+        "suggested_fix": "Restore the orders envelope or propose a contract change before updating consumers.",
     }),
     ("carol", "declare_intent", {"files": ["backend/api/orders.py"], "summary": "Order join lives here instead"}),
     ("carol", "edit", {"file": "backend/api/orders.py", "diff": ""}),
@@ -66,10 +71,19 @@ if __name__ == "__main__":
         [(c, o, json.dumps(cons), json.dumps(shape, indent=2)) for c, o, cons, shape in SPEC],
     )
     conn.executemany("INSERT INTO claims VALUES (?, ?, ?, datetime('now'))", CLAIMS)
-    conn.executemany(
-        "INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)",
-        [(a, t, json.dumps(p)) for a, t, p in EVENTS],
-    )
+    specs = {contract: (owner, consumers) for contract, owner, consumers, _ in SPEC}
+    edits = {}
+    for agent, event_type, payload in EVENTS:
+        payload = dict(payload)
+        if event_type == "alert":
+            owner, consumers = specs[payload["contract"]]
+            payload.update(owner=owner, consumers=consumers, edit_id=edits[owner])
+        cursor = conn.execute(
+            "INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)",
+            (agent, event_type, json.dumps(payload)),
+        )
+        if event_type == "edit":
+            edits[payload["file"]] = cursor.lastrowid
     conn.commit()
     conn.close()
     print(f"Seeded {DB_PATH}: {len(SPEC)} spec, {len(CLAIMS)} claims, {len(EVENTS)} events.")
