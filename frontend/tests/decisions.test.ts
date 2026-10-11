@@ -34,7 +34,8 @@ const rows = (db: DatabaseSync) => db.prepare('SELECT * FROM events ORDER BY id'
 test('a fresh snapshot shows pending proposals, open alerts, derived task and affects', () => {
   const db = seeded()
   const snap = snapshot(db, rows(db))
-  assert.deepEqual(snap.agents.map((a) => [a.id, a.task]), [['aruneem', 'Return first_name/last_name'], ['matthew', 'List orders'], ['coordinator', undefined]])
+  assert.deepEqual(snap.agents.map((a) => [a.id, a.task]), [['aruneem', 'Return first_name/last_name'], ['matthew', 'List orders']])
+  assert.ok(!snap.agents.some((a) => a.id === 'coordinator'), 'the coordinator reviews edits but is not a crew member')
   assert.equal(snap.proposals.length, 1)
   assert.equal(snap.proposals[0].status, undefined, 'store.ts defaults an undecided proposal to pending')
   assert.deepEqual(snap.proposals[0].affects, ['matthew'], 'whoever claimed a consumer file, minus the proposer')

@@ -93,7 +93,7 @@ POST /api/alerts/{id}/resolve
 | `proposal_decision` | `{proposal_id, status, entry, previous_shape?, shape?}` | on `accepted`, **rewrites `spec.shape` for `entry` to the proposal's `change`** — the one path allowed to, per the guarantees below. `change` must be JSON (it becomes the shape `judge_edit` parses); free text is refused with `422`. A proposal is decided once: a second call is `409`. |
 | `alert_resolved` | `{alert_id}` | the alert is no longer open: `/events` stops delivering it and `check_conflicts` stops reporting it. Idempotent. |
 
-Identity: the dashboard has no login (SPEC.md puts auth out of scope), so these routes are open like `/health`, and the row's `agent` is `"human"`. If a teammate's bearer token is sent, the row is attributed to them instead. The dashboard's SSE server hides `"human"` from the crew list.
+Identity: the dashboard has no login (SPEC.md puts auth out of scope), so these routes are open like `/health`, and the row's `agent` is `"human"`. If a teammate's bearer token is sent, the row is attributed to them instead. The dashboard's SSE server hides `"human"` from the crew list, just as it hides `"coordinator"`: neither is a teammate's coding agent, so neither gets a crew entry — their events still reach the Feed.
 
 Unknown id, or an id of the wrong row type, is `404`; a body without a valid `status` is `400`. Caddy routes `/api/*` to the Python service (and `/api/stream` to the dashboard); the Vite dev server proxies the same two prefixes to `localhost:8000`.
 
