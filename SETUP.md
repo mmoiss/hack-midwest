@@ -150,8 +150,8 @@ python3 scripts/make_tokens.py alice bob carol dave > .env
 
 The `TEAM_TOKENS=` line goes into the file; each person's token prints to the terminal.
 **Copy those off the screen** — re-running generates entirely different tokens and invalidates
-any you already handed out. Keep the names aligned with `backend/seed.py`'s claims
-(`alice`, `bob`, `carol`) so the demo's lookups resolve.
+any you already handed out. Keep the names aligned with `demo-repo/scripts/reset.sh`'s
+claims (`alice`, `bob`) so the demo's lookups resolve.
 
 Then append the rest:
 
@@ -229,6 +229,7 @@ while the server worked fine. If you do set `DB_PATH` (for either `.env`), set i
 same value in both — see the comments in `.env.example` and `frontend/.env.example`.
 
 To confirm it's actually wired up: run `python backend/seed.py` once, then open the
-dashboard (`npm run dev` in `frontend/`) and confirm the seeded agents/claims appear. An
+dashboard (`npm run dev` in `frontend/`) and confirm the two contracts' files appear on
+the Map (seed.py writes no agents or events; those only come from real tool calls). An
 empty dashboard with a server that starts cleanly is the exact symptom of a `DB_PATH`
 mismatch, not a crash you'd notice otherwise.

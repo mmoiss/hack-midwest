@@ -43,9 +43,9 @@ class EventsAnswersBeforeJudging(unittest.TestCase):
         os.environ["DB_PATH"] = cls.db
         os.environ["COORDINATOR_DB_PATH"] = cls.db
         os.environ["TEAM_TOKENS"] = json.dumps(TOKENS)
-        runpy.run_path(str(ROOT / "backend" / "seed.py"), run_name="__main__")  # spec + bob's claim on UserCard.tsx
+        runpy.run_path(str(ROOT / "backend" / "seed.py"), run_name="__main__")  # the two contracts
         conn = sqlite3.connect(cls.db)
-        conn.execute("DELETE FROM events")  # the seeded alerts would otherwise be "pending" for bob
+        conn.execute("INSERT INTO claims VALUES ('bob', 'frontend/src/components/UserCard.tsx', 'card', datetime('now'))")
         conn.commit()
         conn.close()
 

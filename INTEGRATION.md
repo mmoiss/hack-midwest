@@ -263,7 +263,7 @@ per `CONTRACT.md` an empty `spec` table means drift can never fire. Brought curr
 git checkout main && git pull origin main   # -> 8670226
 docker compose up -d --build
 docker compose exec app python backend/seed.py
-curl -s https://172-237-146-90.sslip.io/health   # "events": 12 -- matches seed.py's row count exactly
+curl -s https://172-237-146-90.sslip.io/health   # "events": 12 matched seed.py's row count at the time; it now seeds contracts only, so expect 0
 ```
 
 Then re-ran the actual drift smoke test against the now-current server — a real `/events`

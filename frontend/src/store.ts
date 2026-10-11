@@ -50,6 +50,7 @@ type Data = {
   alerts: Alert[]
   events: FeedEvent[]
   lastAlert: Alert | null
+  lastProposal: Proposal | null   // newest live proposal; the banner flashes it as "needs your decision"
 }
 
 export type State = Data & {
@@ -71,6 +72,7 @@ export type State = Data & {
   setPage: (p: Page) => void
   openAgent: (id: string) => void
   selectProposal: (id: string) => void
+  openProposal: (id: string) => void
   selectFile: (path: string | null) => void
   hoverAgent: (id: string | null) => void
   decideProposal: (id: string, status: ProposalStatus) => void
@@ -86,6 +88,7 @@ const initial: Data = {
   alerts: [],
   events: [],
   lastAlert: null,
+  lastProposal: null,
 }
 
 // Fill defaults so a half-built backend message can't white-screen the UI.
@@ -132,6 +135,7 @@ function reduce(s: State, { type, data = {}, ts = Date.now() }: Msg): Partial<St
       break
     case 'proposal.add':
       next.proposals = [{ ...fix.proposal(data), ts }, ...s.proposals]
+      next.lastProposal = { ...fix.proposal(data), ts }
       break
     case 'proposal.update':
       next.proposals = s.proposals.map((p) => (p.id === data.id ? { ...p, status: data.status, ...(data.before != null && { before: data.before }) } : p))
@@ -216,6 +220,7 @@ export const useStore = create<State>()((set) => ({
   setPage: (page) => set({ page }),
   openAgent: (selectedAgent) => set({ page: 'agent', selectedAgent }),
   selectProposal: (id) => set((s) => ({ selectedProposal: s.selectedProposal === id ? null : id })),
+  openProposal: (selectedProposal) => set({ page: 'changes', selectedProposal }),
   selectFile: (path) => set({ selectedFile: path }),
   hoverAgent: (id) => set({ hoveredAgent: id }),
 
