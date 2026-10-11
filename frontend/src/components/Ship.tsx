@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore, agentColor, openAlerts, pendingProposals, alertTargets } from '../store'
 import { BRAND, HULL, SKEG } from './Logo'
 
@@ -22,10 +22,17 @@ function wave(y: number, amp: number, period: number) {
 const WAVE_BACK = wave(160, 5, 100)
 const WAVE_FRONT = wave(172, 7, 125)
 
+// Survives Ship remounting between pages: a member id, '' for the overview, or
+// undefined on first load. Lets each page animate from the previous one's poses.
+let lastFocus: string | undefined
+
 export default function Ship({ focus }: { focus?: string }) {
   const s = useStore()
   const [shown, setShown] = useState(focus)
   const [leaving, setLeaving] = useState<string>()
+  const [cameFrom] = useState(lastFocus)
+  useEffect(() => { lastFocus = focus ?? '' }, [focus])
+  const fromOverview = cameFrom === '' && !leaving
   if (focus !== shown) {
     setLeaving(shown)
     setShown(focus)
@@ -52,18 +59,12 @@ export default function Ship({ focus }: { focus?: string }) {
 
   return (
     <section>
-      {!focus && (
-        <div className="px-6 pt-5">
-          <h1 className="text-lg font-semibold">On deck</h1>
-          <p className="text-sm text-muted">{crew.length ? counts.join(', ') : 'No crew on deck yet'}</p>
-        </div>
-      )}
-      <svg viewBox={`0 0 1000 ${H}`} className="block h-auto w-full" role="group" aria-label={`${crew.length} agents on deck${open.length ? `, ${open.length} open alert` : ''}`}>
+      <svg viewBox={`0 0 1000 ${H}`} className="block h-auto w-full" role="group">
         <g className="skeg-wave-back"><path d={WAVE_BACK} fill="var(--water-back)" /></g>
 
         <g className="skeg-members">
           {crew.map((c, i) => {
-            const pose = !focus ? undefined : c.id === focus ? 'skeg-stand-up' : c.id === leaving ? 'skeg-sit-down' : 'skeg-seated'
+            const pose = !focus ? (cameFrom && c.id !== cameFrom ? 'skeg-stand-up' : undefined) : c.id === focus ? (fromOverview ? undefined : 'skeg-stand-up') : c.id === leaving || fromOverview ? 'skeg-sit-down' : 'skeg-seated'
             return (
               <a
                 key={c.id}
