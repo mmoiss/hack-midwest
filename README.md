@@ -16,9 +16,9 @@
 
 ## The problem
 
-Shipping fast can get messy; one teammate's agent can change an API response shape, while another teammate's agent builds a frontend against the old shape. Nobody finds out until merge. Skeg catches drift and collisions in coding agents in just a few seconds after the edit, while the other agent is still typing, and can name the teammate it breaks, suggest a fix, and hand the alert to that teammate's agent on its very next tool call.
+Shipping fast can get messy; one teammate's agent can change an API response shape, while another teammate's agent builds a frontend against the old shape. Nobody finds out until merge. Plenty of frameworks exist to coordinate one person's agents, but nothing exists to coordinate a whole team's set of agents. Where edits are fast, time is money, and several agents each hold different context, the importance is clear.
 
-Plenty of frameworks exist to coordinate one person's agents, but nothing exists to coordinate a whole **team's** set of agents. Where edits are fast, time is money, and several agents each hold different context, the importance is clear.
+Skeg catches drift and collisions in coding agents in just a few seconds after the edit, while the other agent is still typing, and can name the teammate it breaks, suggest a fix, and hand the alert to that teammate's agent on its very next tool call. Simply put, Skeg gives a team's coding agents a single shared record of what the team agreed on, and places a feedback loop that catches any edit violating that agreement within seconds, putting the correction directly into the affected agent's context long before anyone would have found any vulnerabilities at merge.
 
 ## How it works
 
