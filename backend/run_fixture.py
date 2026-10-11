@@ -5,8 +5,8 @@ COORDINATOR_MODEL_PROVIDER is set to a stand-in (anthropic/openai/ollama/bedrock
 Writes to coordinator_fixture.db by default so it never touches the real
 server's database.
 
-Seeds one claim (bob on UserCard.tsx, matching backend/seed.py's real demo
-data) so run_coordinator's claims-table lookup has something to resolve --
+Seeds one claim (bob on UserCard.tsx, matching demo-repo/scripts/reset.sh's demo
+claims) so run_coordinator's claims-table lookup has something to resolve --
 otherwise `affected` would fall back to the raw consumer file path.
 
 Usage:
