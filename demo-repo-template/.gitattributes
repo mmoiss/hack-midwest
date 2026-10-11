@@ -1,0 +1,3 @@
+# Every demo clone is its own repo and does not inherit the outer .gitattributes. Keep the
+# launcher LF: with core.autocrlf on Windows a CRLF demo.sh fails with ": command not found".
+*.sh text eol=lf
