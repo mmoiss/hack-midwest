@@ -8,7 +8,8 @@
     "server": "node --env-file-if-exists=.env server.ts",
     "build": "tsc && vite build",
     "typecheck": "tsc",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test \"tests/**/*.test.ts\""
   },
   "dependencies": {
     "@xyflow/react": "^12.12.0",

@@ -1,4 +1,4 @@
-import { useStore, agentColor } from '../store'
+import { useStore, agentColor, agentStatus } from '../store'
 import { Changes, Alerts, Feed, Empty } from './Lists'
 import { Section } from './Overview'
 import Ship from './Ship'
@@ -10,10 +10,12 @@ const STATUS: Record<string, string> = {
 
 // Everything one agent is doing: task, claims, proposals, alerts and activity.
 export default function AgentPage() {
-  const { agents, claims, selectedAgent, selectFile, setPage } = useStore()
+  const s = useStore()
+  const { agents, claims, selectedAgent, selectFile, setPage } = s
   const a = selectedAgent ? agents[selectedAgent] : null
   if (!a) return <Empty>Pick an agent from the sidebar</Empty>
   const mine = claims.filter((c) => c.agentId === a.id)
+  const status = agentStatus(s, a.id)
 
   return (
     <div className="flex min-h-full flex-col">
@@ -23,7 +25,7 @@ export default function AgentPage() {
           <div className="flex items-center gap-3">
             <span className="h-3 w-3 rounded-full" style={{ background: agentColor(agents, a.id) }} />
             <h1 className="text-lg font-semibold">{a.name}</h1>
-            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS[a.status ?? ''] ?? 'bg-surface text-muted'}`}>{a.status}</span>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS[status] ?? 'bg-surface text-muted'}`}>{status}</span>
           </div>
           {a.task && <p className="mt-2 text-sm text-muted">{a.task}</p>}
           {a.currentFile && (

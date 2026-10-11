@@ -62,7 +62,8 @@ CREATE TABLE events (
     ts      TEXT NOT NULL DEFAULT (datetime('now')),
     agent   TEXT NOT NULL,
     type    TEXT NOT NULL,        -- "edit" | "declare_intent" | "check_conflicts" | "get_spec" |
-                                   -- "propose_spec_change" | "alert" | "checked_clean"
+                                   -- "propose_spec_change" | "alert" | "checked_clean" |
+                                   -- "proposal_decision" | "alert_resolved"   (dashboard, see below)
     payload TEXT NOT NULL,        -- JSON, shape depends on type
     delivered_to TEXT NOT NULL DEFAULT '[]'  -- JSON list of agent names already handed this row
 );
@@ -72,11 +73,31 @@ CREATE TABLE events (
 
 `spec` is hand-written once at setup for the demo repo. `claims` and `events` fill up live. The coordinator's `raise_alert` and `escalate_to_human` write `events` rows with `type = "alert"`; everything else — MCP tools and the hook — writes the row types listed above. Nothing lives outside these three tables; there is no second store to fall out of sync.
 
+## Dashboard decisions
+
+The two buttons on the dashboard that need a writer — **Accept/Reject** on a proposal and **Mark resolved** on an alert — go to the Python service, not the dashboard's Node server (which stays read-only). Two plain routes next to `/events`:
+
+```
+POST /api/proposals/{id}          { "status": "accepted" | "rejected" }
+POST /api/alerts/{id}/resolve
+```
+
+`{id}` is the `events.id` of the `propose_spec_change` / `alert` row, which is what the dashboard already uses as the proposal or alert id. Each call logs one event:
+
+| Row | Payload | Effect |
+|---|---|---|
+| `proposal_decision` | `{proposal_id, status, entry, previous_shape?, shape?}` | on `accepted`, **rewrites `spec.shape` for `entry` to the proposal's `change`** — the one path allowed to, per the guarantees below. `change` must be JSON (it becomes the shape `judge_edit` parses); free text is refused with `422`. A proposal is decided once: a second call is `409`. |
+| `alert_resolved` | `{alert_id}` | the alert is no longer open: `/events` stops delivering it and `check_conflicts` stops reporting it. Idempotent. |
+
+Identity: the dashboard has no login (SPEC.md puts auth out of scope), so these routes are open like `/health`, and the row's `agent` is `"human"`. If a teammate's bearer token is sent, the row is attributed to them instead. The dashboard's SSE server hides `"human"` from the crew list.
+
+Unknown id, or an id of the wrong row type, is `404`; a body without a valid `status` is `400`. Caddy routes `/api/*` to the Python service (and `/api/stream` to the dashboard); the Vite dev server proxies the same two prefixes to `localhost:8000`.
+
 ## Guarantees
 
 - The server never pushes to an agent mid-session. An agent only learns things on its *next* `/events` call.
 - Only the coordinator's tools write `type = "alert"` rows. MCP tools and the hook log facts; they never judge a contract break themselves.
-- `spec.shape` changes only when a human accepts a `propose_spec_change`. Catching drift never rewrites it.
+- `spec.shape` changes only when a human accepts a `propose_spec_change` (`POST /api/proposals/{id}` above). Catching drift never rewrites it.
 - The Python service is the only writer of the SQLite file. It runs in WAL mode so the dashboard's TypeScript server can poll `events` for new rows and push them to the browser over Server-Sent Events, without a WebSocket or a second API layer.
 
 ## Running on Akamai

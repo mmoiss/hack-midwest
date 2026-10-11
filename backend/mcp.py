@@ -123,6 +123,24 @@ def log_event(agent: str, event_type: str, payload: dict) -> None:
     conn.close()
 
 
+def resolved_alert_ids(conn) -> set[int]:
+    """Ids of `alert` rows a human has marked resolved from the dashboard.
+
+    Resolution is its own event row (type "alert_resolved") rather than a flag on the
+    alert, so the log stays append-only and the dashboard feed shows who closed it. An
+    alert that was resolved before an agent's next hook call is no longer "open", so
+    neither /events delivery nor check_conflicts should surface it.
+    """
+    rows = conn.execute("SELECT payload FROM events WHERE type = 'alert_resolved'").fetchall()
+    ids: set[int] = set()
+    for row in rows:
+        try:
+            ids.add(int(json.loads(row["payload"]).get("alert_id")))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
 def should_run_coordinator(file: str) -> bool:
     """Debounce: at most one coordinator call per file per DEBOUNCE_SECONDS.
 
@@ -188,9 +206,12 @@ def fetch_undelivered_alerts(agent: str) -> list[dict]:
     rows = conn.execute(
         "SELECT id, payload, delivered_to FROM events WHERE type = 'alert' ORDER BY id"
     ).fetchall()
+    resolved = resolved_alert_ids(conn)
 
     pending = []
     for row in rows:
+        if row["id"] in resolved:
+            continue
         payload = json.loads(row["payload"])
         delivered_to = json.loads(row["delivered_to"])
         if agent in payload.get("affected", []) and agent not in delivered_to:
@@ -242,13 +263,16 @@ def check_conflicts(files: list[str]) -> str:
         (*files, agent),
     ).fetchall()
     alert_rows = conn.execute(
-        "SELECT payload FROM events WHERE type = 'alert' ORDER BY id DESC LIMIT 50"
+        "SELECT id, payload FROM events WHERE type = 'alert' ORDER BY id DESC LIMIT 50"
     ).fetchall()
+    resolved = resolved_alert_ids(conn)
     conn.close()
     log_event(agent, "check_conflicts", {"files": files})
 
     lines = [f"{row['agent']} is working on {row['file']}: {row['summary']}" for row in claim_rows]
     for row in alert_rows:
+        if row["id"] in resolved:
+            continue
         alert = json.loads(row["payload"])
         if agent in alert.get("affected", []):
             lines.append(f"Open alert for you: {alert.get('summary')}")
@@ -273,7 +297,12 @@ def get_spec(path: str) -> str:
 
 @mcp.tool()
 def propose_spec_change(entry: str, change: str, reason: str) -> str:
-    """Ask to change a contract's agreed shape. The spec does not change until a human accepts this."""
+    """Ask to change a contract's agreed shape. The spec does not change until a human accepts this.
+
+    `entry` is the contract name exactly as get_spec reports it (e.g. "GET /users/{id}").
+    `change` is the complete new shape as JSON text -- the dashboard diffs it against the
+    current shape, and on acceptance it becomes the new agreed shape verbatim.
+    """
     agent, _ = caller_identity()
     log_event(agent, "propose_spec_change", {"entry": entry, "change": change, "reason": reason})
     return f"Proposal for {entry} logged. Waiting on a human to accept it before the spec changes."
@@ -315,6 +344,120 @@ async def handle_events(request: Request) -> JSONResponse:
         judge_edit(diff, owner_row, agent)
 
     return JSONResponse({"alerts": fetch_undelivered_alerts(agent)})
+
+
+def _decider(request: Request) -> str:
+    """Who made a dashboard decision.
+
+    The dashboard has no login (SPEC.md puts auth out of scope), so these routes are open
+    like /health and the decision is attributed to "human". A teammate's bearer token, if
+    one is sent, attributes it to them instead.
+    """
+    try:
+        name, _ = resolve_identity(_bearer(request.headers.get("authorization", "")))
+        return name
+    except ValueError:
+        return "human"
+
+
+def _event_row(conn, event_id: str, expected_type: str):
+    try:
+        event_id = int(event_id)
+    except ValueError:
+        return None
+    row = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+    return row if row is not None and row["type"] == expected_type else None
+
+
+@mcp.custom_route("/api/proposals/{proposal_id}", methods=["POST"])
+async def handle_proposal_decision(request: Request) -> JSONResponse:
+    """A human accepts or rejects a propose_spec_change from the dashboard.
+
+    Body: {"status": "accepted" | "rejected"}. The proposal id is the id of its
+    propose_spec_change event row, which is what the dashboard uses as the proposal id.
+
+    Accepting is the one path that rewrites spec.shape (CONTRACT.md, Guarantees): the
+    proposal's `change` text becomes the new shape. It has to be valid JSON, because
+    judge_edit json.loads() the shape on every later edit -- a free-text shape would
+    silently disable drift checks for that contract.
+    """
+    proposal_id = request.path_params["proposal_id"]
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "body must be JSON"}, status_code=400)
+    status = body.get("status") if isinstance(body, dict) else None
+    if status not in ("accepted", "rejected"):
+        return JSONResponse({"error": "field 'status' must be 'accepted' or 'rejected'"}, status_code=400)
+
+    decider = _decider(request)
+    conn = get_db()
+    try:
+        row = _event_row(conn, proposal_id, "propose_spec_change")
+        if row is None:
+            return JSONResponse({"error": f"no proposal with id {proposal_id}"}, status_code=404)
+        proposal = json.loads(row["payload"])
+
+        for prior in conn.execute("SELECT payload FROM events WHERE type = 'proposal_decision'").fetchall():
+            decided = json.loads(prior["payload"])
+            if decided.get("proposal_id") == row["id"]:
+                return JSONResponse(
+                    {"error": f"proposal {row['id']} is already {decided.get('status')}", "status": decided.get("status")},
+                    status_code=409,
+                )
+
+        payload = {"proposal_id": row["id"], "status": status, "entry": proposal.get("entry")}
+        if status == "accepted":
+            try:
+                new_shape = json.loads(proposal.get("change", ""))
+            except (TypeError, ValueError):
+                return JSONResponse(
+                    {"error": "the proposal's `change` is not JSON, so it cannot become the new shape; reject it and re-propose"},
+                    status_code=422,
+                )
+            current = conn.execute("SELECT shape FROM spec WHERE contract = ?", (proposal.get("entry"),)).fetchone()
+            if current is None:
+                return JSONResponse({"error": f"no spec entry named {proposal.get('entry')!r}"}, status_code=404)
+            shape_text = json.dumps(new_shape, indent=2)  # same formatting backend/seed.py writes
+            conn.execute("UPDATE spec SET shape = ? WHERE contract = ?", (shape_text, proposal.get("entry")))
+            # Kept so the dashboard can still diff an accepted proposal against what the
+            # shape was, now that spec.shape itself equals the proposal.
+            payload["previous_shape"] = current["shape"]
+            payload["shape"] = shape_text
+        conn.execute(
+            "INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)",
+            (decider, "proposal_decision", json.dumps(payload)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return JSONResponse({"id": row["id"], "status": status, "by": decider})
+
+
+@mcp.custom_route("/api/alerts/{alert_id}/resolve", methods=["POST"])
+async def handle_alert_resolve(request: Request) -> JSONResponse:
+    """A human marks an alert resolved from the dashboard.
+
+    Logs an alert_resolved event; the alert row itself is never edited. Idempotent: a
+    second call for the same alert answers 200 without logging a duplicate.
+    """
+    alert_id = request.path_params["alert_id"]
+    decider = _decider(request)
+    conn = get_db()
+    try:
+        row = _event_row(conn, alert_id, "alert")
+        if row is None:
+            return JSONResponse({"error": f"no alert with id {alert_id}"}, status_code=404)
+        if row["id"] in resolved_alert_ids(conn):
+            return JSONResponse({"id": row["id"], "status": "resolved", "already": True})
+        conn.execute(
+            "INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)",
+            (decider, "alert_resolved", json.dumps({"alert_id": row["id"]})),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return JSONResponse({"id": row["id"], "status": "resolved", "by": decider})
 
 
 @mcp.custom_route("/health", methods=["GET"])

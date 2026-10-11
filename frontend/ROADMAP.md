@@ -40,7 +40,8 @@ npm run dev                      # connects to FastAPI on localhost:8000 via the
 | Collision and drift signals (rings, banner, cards) | `CodebaseMap.tsx`, `AlertBanner.tsx`, `Lists.tsx` → `Alerts` | ✅ |
 | Live event feed | `Lists.tsx` → `Feed` | ✅ |
 | Sidebar navigation and overview landing page | `Sidebar.tsx`, `Overview.tsx` | ✅ |
-| WebSocket client with reconnect | `src/ws.js` | ✅ |
+| SSE client with reconnect, live/offline pill | `src/live.ts`, `Sidebar.tsx` | ✅ |
+| Accept/Reject and Mark resolved wired to the Python server | `src/store.ts` → `decideProposal`, `resolveAlert` | ✅ |
 | State + event reducer | `src/store.ts` | ✅ |
 
 ---
@@ -63,12 +64,14 @@ The full schema is at the top of `src/store.ts`.
 | `alert.add` | `{id, type: collision\|drift, severity, agents[], files[], message, suggestion}` |
 | `alert.resolve` | `{id}` |
 
-**REST (human decisions):**
+**REST (human decisions)** — served by the Python server (`backend/mcp.py`), the only SQLite writer; same origin via the Vite proxy in dev and Caddy's `/api/*` route in production:
 
-- `POST /api/proposals/{id}` with body `{status}`
+- `POST /api/proposals/{id}` with body `{status: accepted | rejected}` — accept rewrites the contract's agreed shape
 - `POST /api/alerts/{id}/resolve`
 
-The backend applies each decision, then broadcasts the resulting event, so every open dashboard stays in sync.
+The backend logs each decision as an event (`proposal_decision` / `alert_resolved`); `server.ts` turns those into `proposal.update` / `alert.resolve` on the feed and folds them into the snapshot, so every open dashboard stays in sync. The store applies the change locally first and disables the button while the request is in flight; a failure shows a short notice and leaves the row as it was.
+
+**Derived fields:** the backend records facts, not statuses, so `agent.status` (`blocked` if an open alert names the agent, `editing` if it has touched a file, else `idle`) is computed in `store.ts` (`agentStatus`), `agent.task` is the latest `declare_intent` summary, and `alert.type` is `drift` or `escalation`. `severity` and `tool` are not provided and are hidden when absent.
 
 **Colors:** the dashboard assigns each agent a color from its own warm palette in registration order (`PALETTE` in `store.ts`) and ignores the backend's `color` field, so the scheme stays consistent no matter what tokens are configured.
 
@@ -91,7 +94,7 @@ The backend applies each decision, then broadcasts the resulting event, so every
 ### Phase 2: Wire to the real backend (hours 3–8)
 - [ ] Point `VITE_WS_URL` at the Linode stub as soon as it exists. Run `snapshot` and one other event end to end.
 - [ ] Build the `file.add` flow: the backend scans the demo repo and sends `snapshot.files`, plus `deps` if import parsing is cheap (otherwise skip `deps`).
-- [ ] Hook the Accept/Reject and Resolve buttons to the REST endpoints.
+- [x] Hook the Accept/Reject and Resolve buttons to the REST endpoints.
 - [ ] Test reconnect: kill the backend and confirm the OFFLINE pill and auto-reconnect.
 
 ### Phase 3: Demo polish (hours 8–16)

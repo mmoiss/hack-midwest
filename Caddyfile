@@ -33,6 +33,14 @@
 		}
 	}
 
+	# Human decisions from the dashboard (Accept/Reject a proposal, Mark resolved):
+	# /api/proposals/{id} and /api/alerts/{id}/resolve on the Python server, the only
+	# SQLite writer. Caddy matches handle blocks longest-path-first, so /api/stream above
+	# keeps its own route regardless of order.
+	handle /api/* {
+		reverse_proxy app:8000
+	}
+
 	# Everything else is the built React app, served off disk by Caddy.
 	# server.ts deliberately does not serve static files — it 404s anything that is not
 	# /api/stream — so nothing would answer here without this block.

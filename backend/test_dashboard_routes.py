@@ -1,0 +1,139 @@
+"""Tests for the dashboard's human-decision routes in backend/mcp.py.
+
+    python -m pytest backend/test_dashboard_routes.py      # from the repo root
+    python -m backend.test_dashboard_routes                # same, without pytest
+
+Runs the FastMCP app in-process against a throwaway SQLite file seeded with
+backend/seed.py's rows, so no server, token file or model key is needed. The point of
+these: Accept is the only thing allowed to rewrite spec.shape (CONTRACT.md), and a resolved
+alert must stop reaching agents through /events and check_conflicts.
+"""
+
+import importlib
+import json
+import os
+import sqlite3
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+from starlette.testclient import TestClient
+
+ROOT = Path(__file__).resolve().parent.parent
+TOKENS = {"tok_alice": {"name": "alice", "color": "#c8794a"}, "tok_bob": {"name": "bob", "color": "#7a9a6e"}}
+
+
+def seed(db_path: str) -> None:
+    """Run backend/seed.py against db_path (it honours DB_PATH)."""
+    import runpy
+
+    os.environ["DB_PATH"] = db_path
+    runpy.run_path(str(ROOT / "backend" / "seed.py"), run_name="__main__")
+
+
+class DashboardRoutes(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)  # Windows: SQLite may still hold the file
+        cls.db = os.path.join(cls.tmp.name, "coordinator.db")
+        seed(cls.db)
+        os.environ["TEAM_TOKENS"] = json.dumps(TOKENS)
+        os.environ["COORDINATOR_DB_PATH"] = cls.db
+        sys.path.insert(0, str(ROOT))
+        import backend.mcp as mcp
+
+        cls.mcp = importlib.reload(mcp)  # pick up DB_PATH / TEAM_TOKENS set above
+        cls.mcp.init_db()
+        cls.client = TestClient(cls.mcp.mcp.http_app())
+        cls.client.__enter__()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.client.__exit__(None, None, None)
+        cls.tmp.cleanup()
+
+    def shape(self, contract: str) -> str:
+        conn = sqlite3.connect(self.db)
+        try:
+            return conn.execute("SELECT shape FROM spec WHERE contract = ?", (contract,)).fetchone()[0]
+        finally:
+            conn.close()
+
+    def events(self, *types: str) -> list[tuple]:
+        conn = sqlite3.connect(self.db)
+        try:
+            q = ",".join("?" for _ in types)
+            return conn.execute(f"SELECT id, agent, type, payload FROM events WHERE type IN ({q}) ORDER BY id", types).fetchall()
+        finally:
+            conn.close()
+
+    def hook(self, token: str) -> list[dict]:
+        r = self.client.post("/events", json={"agent": "x", "file": "README.md", "diff": ""}, headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(r.status_code, 200)
+        return r.json()["alerts"]
+
+    def test_1_validation(self):
+        self.assertEqual(self.client.post("/api/proposals/7", json={"status": "maybe"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/proposals/7", content=b"not json").status_code, 400)
+        self.assertEqual(self.client.post("/api/proposals/999", json={"status": "accepted"}).status_code, 404)
+        self.assertEqual(self.client.post("/api/proposals/8", json={"status": "accepted"}).status_code, 404, "8 is an alert, not a proposal")
+        self.assertEqual(self.client.post("/api/alerts/7/resolve").status_code, 404, "7 is a proposal, not an alert")
+        self.assertEqual(self.client.post("/api/alerts/nope/resolve").status_code, 404)
+        self.assertEqual(self.events("alert_resolved", "proposal_decision"), [], "nothing logged for rejected input")
+
+    def test_2_resolve_alert_stops_delivery(self):
+        # Seeded alert 8 names alice and bob; alert 10 names alice and carol. bob gets 8 first.
+        self.assertEqual([a["affected"] for a in self.hook("tok_bob")], [["alice", "bob"]])
+
+        r = self.client.post("/api/alerts/8/resolve")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json(), {"id": 8, "status": "resolved", "by": "human"})
+        r = self.client.post("/api/alerts/8/resolve")
+        self.assertEqual(r.json().get("already"), True, "second resolve is idempotent")
+        r = self.client.post("/api/alerts/10/resolve", headers={"Authorization": "Bearer tok_bob"})
+        self.assertEqual(r.json()["by"], "bob", "a teammate's token attributes the decision")
+
+        self.assertEqual(self.hook("tok_alice"), [], "alice never sees alerts resolved before her next hook call")
+        self.assertEqual(len(self.events("alert_resolved")), 2, "no duplicate row for the idempotent call")
+
+        # check_conflicts skips resolved alerts too: nothing open names bob now.
+        self.assertEqual(self.mcp.resolved_alert_ids(self.mcp.get_db()), {8, 10})
+
+    def test_3_accept_rewrites_shape(self):
+        before = self.shape("GET /users/{id}")
+        self.assertIn('"name"', before)
+
+        r = self.client.post("/api/proposals/7", json={"status": "accepted"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json(), {"id": 7, "status": "accepted", "by": "human"})
+
+        after = self.shape("GET /users/{id}")
+        self.assertIn('"first_name"', after)
+        self.assertNotIn('"name"', after)
+        self.assertEqual(self.shape("GET /orders"), '{\n  "orders": "Order[]"\n}', "other contracts untouched")
+
+        payload = json.loads(self.events("proposal_decision")[-1][3])
+        self.assertEqual(payload, {"proposal_id": 7, "status": "accepted", "entry": "GET /users/{id}", "previous_shape": before, "shape": after})
+
+        r = self.client.post("/api/proposals/7", json={"status": "rejected"})
+        self.assertEqual(r.status_code, 409, "a proposal is decided once")
+        self.assertEqual(self.shape("GET /users/{id}"), after)
+
+    def test_4_free_text_change_cannot_be_accepted(self):
+        conn = sqlite3.connect(self.db)
+        conn.execute(
+            "INSERT INTO events (agent, type, payload) VALUES ('bob', 'propose_spec_change', ?)",
+            (json.dumps({"entry": "GET /orders", "change": "drop total", "reason": "test"}),),
+        )
+        conn.commit()
+        pid = conn.execute("SELECT max(id) FROM events").fetchone()[0]
+        conn.close()
+
+        self.assertEqual(self.client.post(f"/api/proposals/{pid}", json={"status": "accepted"}).status_code, 422)
+        self.assertEqual(self.shape("GET /orders"), '{\n  "orders": "Order[]"\n}')
+        self.assertEqual(self.client.post(f"/api/proposals/{pid}", json={"status": "rejected"}).status_code, 200)
+
+
+if __name__ == "__main__":
+    unittest.main()

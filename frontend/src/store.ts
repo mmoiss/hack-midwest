@@ -11,9 +11,15 @@ import { create } from 'zustand'
  * claim.add        { agentId, path, intent }
  * claim.release    { agentId, path }
  * proposal.add     { id, agentId, title, target, rationale, before, after, status, affects[] }
- * proposal.update  { id, status }                     // pending | accepted | rejected
- * alert.add        { id, type, severity, agents[], files[], message, suggestion }
- * alert.resolve    { id }
+ * proposal.update  { id, status, by?, before? }        // pending | accepted | rejected
+ * alert.add        { id, type, severity?, agents[], files[], message, suggestion }
+ * alert.resolve    { id, by? }
+ *
+ * Human decisions (dashboard -> Python server, the only SQLite writer; see backend/mcp.py):
+ *   POST /api/proposals/{id}        { status: accepted | rejected }
+ *   POST /api/alerts/{id}/resolve
+ * The server logs each as an event, and the feed above carries the resulting
+ * proposal.update / alert.resolve to every open dashboard.
  */
 
 export type AgentStatus = 'editing' | 'idle' | 'blocked' | string
@@ -25,9 +31,9 @@ export type Proposal = {
   id: string; agentId: string; title: string; target: string; rationale?: string
   before: string; after: string; status: ProposalStatus; affects: string[]; ts?: number
 }
-export type AlertType = 'collision' | 'drift' | string
+export type AlertType = 'collision' | 'drift' | 'escalation' | string
 export type Alert = {
-  id: string; type: AlertType; severity: string; agents: string[]; files: string[]
+  id: string; type: AlertType; severity?: string; agents: string[]; files: string[]
   message: string; suggestion?: string; status: 'open' | 'resolved'; ts: number
 }
 export type FeedEvent = { id: string; type: string; data: any; ts: number }
@@ -57,6 +63,8 @@ export type State = Data & {
   selectedProposal: string | null
   selectedFile: string | null
   hoveredAgent: string | null
+  pending: Record<string, true>   // proposal/alert ids with a decision in flight
+  notice: string | null           // last failed decision, shown briefly by App
   toggleTheme: () => void
   apply: (msg: Msg) => void
   setConnection: (c: Connection) => void
@@ -67,6 +75,7 @@ export type State = Data & {
   hoverAgent: (id: string | null) => void
   decideProposal: (id: string, status: ProposalStatus) => void
   resolveAlert: (id: string) => void
+  dismissNotice: () => void
 }
 
 const initial: Data = {
@@ -83,7 +92,7 @@ const initial: Data = {
 const fix = {
   file: (f: any): FileEntry => ({ deps: [], ...f }),
   proposal: (p: any): Proposal => ({ status: 'pending', affects: [], before: '', after: '', ...p }),
-  alert: (a: any): Alert => ({ status: 'open', severity: 'med', agents: [], files: [], message: '', ...a }),
+  alert: (a: any): Alert => ({ status: 'open', agents: [], files: [], message: '', ...a }),
 }
 
 function reduce(s: State, { type, data = {}, ts = Date.now() }: Msg): Partial<State> {
@@ -115,6 +124,8 @@ function reduce(s: State, { type, data = {}, ts = Date.now() }: Msg): Partial<St
       break
     case 'claim.add':
       next.claims = [...s.claims.filter((c) => !(c.agentId === data.agentId && c.path === data.path)), data]
+      // An agent's "task" is its latest declared intent (same as server.ts's snapshot).
+      if (data.agentId in s.agents) next.agents = { ...s.agents, [data.agentId]: { ...s.agents[data.agentId], task: data.intent } }
       break
     case 'claim.release':
       next.claims = s.claims.filter((c) => !(c.agentId === data.agentId && c.path === data.path))
@@ -123,7 +134,7 @@ function reduce(s: State, { type, data = {}, ts = Date.now() }: Msg): Partial<St
       next.proposals = [{ ...fix.proposal(data), ts }, ...s.proposals]
       break
     case 'proposal.update':
-      next.proposals = s.proposals.map((p) => (p.id === data.id ? { ...p, ...data } : p))
+      next.proposals = s.proposals.map((p) => (p.id === data.id ? { ...p, status: data.status, ...(data.before != null && { before: data.before }) } : p))
       break
     case 'alert.add':
       next.alerts = [{ ...fix.alert(data), ts }, ...s.alerts]
@@ -142,8 +153,40 @@ export const PALETTE = ['#c8794a', '#7a9a6e', '#6a86a3', '#b0655c', '#8f8a5a', '
 export const agentColor = (agents: Record<string, Agent>, id: string): string =>
   PALETTE[Object.keys(agents).indexOf(id) % PALETTE.length] ?? '#b3b0a8'
 
+// Human-readable alert kinds. The backend raises `drift` (raise_alert) and `escalation`
+// (escalate_to_human); `collision` is reserved for the same-file conflict SPEC.md cut.
+export const ALERT_LABEL: Record<string, string> = { collision: 'Collision', drift: 'Contract drift', escalation: 'Human decision' }
+export const alertLabel = (type: string) => ALERT_LABEL[type] ?? 'Alert'
+
 const savedTheme = (): Theme | null => {
   try { return localStorage.getItem('theme') as Theme | null } catch { return null }
+}
+
+// Same origin by default: the Vite dev server proxies /api/proposals and /api/alerts to the
+// Python server, and Caddy routes /api/* to it in production. Override only if the Python
+// server lives somewhere else (then it needs CORS, which it does not do today).
+const API_URL: string = (import.meta as any).env?.VITE_API_URL ?? ''
+
+type Setter = (partial: Partial<State> | ((s: State) => Partial<State>)) => void
+
+// A human decision: POST it to the Python server (the only SQLite writer), which logs it as
+// an event. The SSE feed then carries the resulting proposal.update / alert.resolve to every
+// open dashboard within a poll tick; `patch` is applied locally first only to hide that
+// ~500ms, and is idempotent with the message that follows.
+async function decide(set: Setter, key: string, url: string, body: object, patch: (s: State) => Partial<State>) {
+  set((s) => ({ pending: { ...s.pending, [key]: true } }))
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.error ?? `${res.status} ${res.statusText}`)
+    }
+    set(patch)
+  } catch (e) {
+    set({ notice: `Couldn't save that: ${(e as Error).message}` })
+  } finally {
+    set((s) => { const { [key]: _, ...pending } = s.pending; return { pending } })
+  }
 }
 
 export const useStore = create<State>()((set) => ({
@@ -165,6 +208,8 @@ export const useStore = create<State>()((set) => ({
   selectedProposal: null,
   selectedFile: null,
   hoveredAgent: null,
+  pending: {},
+  notice: null,
 
   apply: (msg) => set((s) => reduce(s, msg)),
   setConnection: (connection) => set({ connection }),
@@ -174,14 +219,20 @@ export const useStore = create<State>()((set) => ({
   selectFile: (path) => set({ selectedFile: path }),
   hoverAgent: (id) => set({ hoveredAgent: id }),
 
-  // ponytail: not wired yet. Needs a Python route (the only SQLite writer) that logs the decision as an event.
-  decideProposal: (id, status) => console.warn('decideProposal not provisioned', id, status),
-  resolveAlert: (id) => console.warn('resolveAlert not provisioned', id),
+  decideProposal: (id, status) =>
+    decide(set, id, `${API_URL}/api/proposals/${encodeURIComponent(id)}`, { status }, (s) => ({
+      proposals: s.proposals.map((p) => (p.id === id ? { ...p, status } : p)),
+    })),
+  resolveAlert: (id) =>
+    decide(set, id, `${API_URL}/api/alerts/${encodeURIComponent(id)}/resolve`, {}, (s) => ({
+      alerts: s.alerts.map((a) => (a.id === id ? { ...a, status: 'resolved' } : a)),
+    })),
+  dismissNotice: () => set({ notice: null }),
 }))
 
 // Derived helpers
-export const openAlerts = (s: State) => s.alerts.filter((a) => a.status === 'open')
-export const pendingProposals = (s: State) => s.proposals.filter((p) => p.status === 'pending')
+export const openAlerts = (s: Pick<State, 'alerts'>) => s.alerts.filter((a) => a.status === 'open')
+export const pendingProposals = (s: Pick<State, 'proposals'>) => s.proposals.filter((p) => p.status === 'pending')
 
 export function alertTargets(s: Pick<State, 'agents' | 'files' | 'claims'>, a: Alert) {
   const named = [...a.agents, ...a.files]
@@ -192,4 +243,12 @@ export function alertTargets(s: Pick<State, 'agents' | 'files' | 'claims'>, a: A
     else if (files.has(c.path)) agents.add(c.agentId)
   }
   return { agents: [...agents], files: [...files] }
+}
+
+// The backend records facts (claims, edits, alerts), not a status, so status is derived here
+// the same way Ship.tsx poses the crew: named by an open alert -> blocked; has touched a
+// file -> editing; otherwise idle.
+export function agentStatus(s: Pick<State, 'agents' | 'files' | 'claims' | 'alerts'>, id: string): AgentStatus {
+  if (openAlerts(s).some((a) => alertTargets(s, a).agents.includes(id))) return 'blocked'
+  return s.agents[id]?.currentFile ? 'editing' : 'idle'
 }

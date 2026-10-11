@@ -1,11 +1,19 @@
 import { useState } from 'react'
-import { useStore, openAlerts, pendingProposals, agentColor, type Page } from '../store'
+import { useStore, openAlerts, pendingProposals, agentColor, agentStatus, type Page, type Connection } from '../store'
 import Logo from './Logo'
 import Icon, { type IconName } from './Icon'
 
 const STATUS_DOT: Record<string, string> = {
   editing: 'bg-ok',
   blocked: 'bg-danger',
+}
+
+// The SSE feed's state (src/live.ts). EventSource reconnects on its own, so "offline" is
+// informational: the page comes back by itself once the dashboard server does.
+const CONNECTION: Record<Connection, [string, string]> = {
+  live: ['Live', 'bg-ok'],
+  connecting: ['Connecting', 'bg-faint animate-flash'],
+  offline: ['Offline', 'bg-danger'],
 }
 
 const item = (active: boolean) =>
@@ -65,7 +73,7 @@ export default function Sidebar() {
                 >
                   <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: agentColor(s.agents, a.id) }} />
                   <span className="truncate">{a.name}</span>
-                  <span title={a.status} className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[a.status ?? ''] ?? 'bg-faint'}`} />
+                  <span title={agentStatus(s, a.id)} className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[agentStatus(s, a.id)] ?? 'bg-faint'}`} />
                 </button>
               </li>
             ))}
@@ -83,8 +91,13 @@ export default function Sidebar() {
         ))}
       </nav>
 
+      <div className="mt-auto flex items-center gap-2 px-6 py-2 text-[11px] text-muted" title="Dashboard feed (/api/stream)">
+        <span className={`h-1.5 w-1.5 rounded-full ${CONNECTION[s.connection][1]}`} />
+        {CONNECTION[s.connection][0]}
+      </div>
+
       {/* Account: a stub that holds the theme toggle until there's a real login. */}
-      <div className="relative mt-auto border-t border-line p-3">
+      <div className="relative border-t border-line p-3">
         {accountOpen && (
           <div className="absolute bottom-full left-3 mb-1 w-[calc(100%-1.5rem)] rounded-xl border border-line bg-canvas p-1 shadow-lg">
             <button onClick={s.toggleTheme} className={item(false)}>
