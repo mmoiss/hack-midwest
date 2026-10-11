@@ -47,7 +47,9 @@ A `PostToolUse` hook reports every edit to the FastMCP server's `/events` route,
 
 ## Powered by AWS and Akamai
 
-| <img src="branding/sponsors/strands-agents.png" alt="Strands Agents SDK" width="180"> | **Strands Agents: the brain of Skeg**<br>Skeg's coordinator is **a Strands agent that supervises other teams' coding agents**, and its tool calls stream onto the dashboard's Feed as they happen. Every reported edit to a contract-owning file goes through the coordinator in [`backend/coordinator.py`](backend/coordinator.py). |
+<h3 align="center">Strands Agents: The Brain of Skeg</h3>
+
+| <img src="branding/sponsors/strands-agents.png" alt="Strands Agents SDK" width="180"> | Skeg's coordinator is **a Strands agent that supervises other teams' coding agents**, and its tool calls stream onto the dashboard's Feed as they happen. Every reported edit to a contract-owning file goes through the coordinator in [`backend/coordinator.py`](backend/coordinator.py). |
 |:---:|---|
 | **`Agent`** | One coordinator agent per edit, given the diff, the agreed contract shape, the teammates who consume it, and any pending proposal. |
 | **`@tool`** | `raise_alert` flags drift that breaks a teammate and suggests a fix. `escalate_to_human` asks for a decision on a deliberate change. The agent calls neither when the edit is clean. |
@@ -72,7 +74,9 @@ agent.add_hook(lambda event: _trace(event, called, trace_ctx),
 agent(prompt)   # no tool call means the edit was clean; logged as "checked_clean"
 ```
 
-| <img src="branding/sponsors/akamai.svg" alt="Akamai" width="280"> | **Akamai: where Skeg lives and thinks**<br>Skeg runs entirely on Akamai Cloud, and its reasoning comes from Akamai inference, giving every teammate's agent one shared, always-on, secure hub to report to. |
+<h3 align="center">Akamai: Where Skeg Lives and Thinks</h3>
+
+| <img src="branding/sponsors/akamai.svg" alt="Akamai" width="280"> | Skeg runs entirely on Akamai Cloud, and its reasoning comes from Akamai inference, giving every teammate's agent one shared, always-on, secure hub to report to. |
 |:---:|---|
 | **Linode VM** | A Linode 2GB (`g6-standard-1`) in Chicago (`us-ord`), set up by [`deploy/cloud-init.yaml`](deploy/cloud-init.yaml), runs the Docker Compose stack: the Python MCP and coordinator service, the Node dashboard adapter, Caddy, and SQLite storage. |
 | **Cloud Firewall** | Allows inbound traffic only on ports 22, 80, and 443 and denies everything else. The backend and dashboard expose no ports; only Caddy is public. |
