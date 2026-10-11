@@ -2,6 +2,9 @@
 // it to the browser over Server-Sent Events, per SPEC.md. Python is the only writer.
 //   GET /api/stream  ->  `snapshot` first, then one message per new `events` row.
 // In dev, vite.config.ts mounts `stream` directly; `npm run server` runs it standalone.
+// Human decisions (Accept/Reject, Mark resolved) never come here: the browser POSTs them
+// to the Python server's /api/proposals and /api/alerts routes, and the resulting
+// proposal_decision / alert_resolved rows flow back through this feed like any other.
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -14,6 +17,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const DB_PATH = process.env.DB_PATH ?? fileURLToPath(new URL('../coordinator.db', import.meta.url))
 const PORT = Number(process.env.PORT ?? 3001)
 const NP = '[NOT PROVISIONED]'
+
+// Dashboard decisions are logged under this agent name (backend/mcp.py _decider). It is a
+// person clicking a button, not a coding agent, so it never joins the crew list.
+const HIDDEN_AGENTS = new Set(['human'])
 
 type Row = { id: number; ts: string; agent: string; type: string; payload: string }
 type Msg = { type: string; data: any }
@@ -28,10 +35,14 @@ function parseColors(teamTokens = '{}'): Record<string, string> {
   }
 }
 let COLORS: Record<string, string> = {}
-const agent = (name: string) => ({ id: name, name, owner: name, color: COLORS[name] ?? '#a1a1aa', tool: NP, status: NP, task: NP })
+// `status` is derived in the browser (store.ts agentStatus) from claims, touches and open
+// alerts, and `task` is the agent's latest declare_intent summary. `tool` stays unknown:
+// the hook's `agent` field is ignored server-side on purpose (CONTRACT.md), so nothing
+// records which CLI an agent is.
+const agent = (name: string, task?: string) => ({ id: name, name, owner: name, color: COLORS[name] ?? '#a1a1aa', task })
 
 // One `events` row -> dashboard messages (see the contract in src/store.ts).
-function translate(db: DatabaseSync, r: Row): Msg[] {
+export function translate(db: DatabaseSync, r: Row): Msg[] {
   const p = JSON.parse(r.payload)
   const agentId = r.agent
   switch (r.type) {
@@ -40,31 +51,49 @@ function translate(db: DatabaseSync, r: Row): Msg[] {
     case 'edit':
       return [{ type: 'file.touch', data: { agentId, path: p.file } }]
     case 'propose_spec_change': {
-      const spec = db.prepare('SELECT owner, shape FROM spec WHERE contract = ?').get(p.entry) as any
+      const spec = db.prepare('SELECT owner, consumers, shape FROM spec WHERE contract = ?').get(p.entry) as any
+      // `affects`: whoever has claimed one of the contract's consumer files -- the same
+      // claims lookup backend/coordinator.py uses to name the teammates an alert affects.
+      const consumers: string[] = spec ? JSON.parse(spec.consumers) : []
+      const affects = consumers.length
+        ? (db.prepare(`SELECT DISTINCT agent FROM claims WHERE file IN (${consumers.map(() => '?').join(',')}) AND agent != ?`).all(...consumers, agentId) as any[]).map((c) => c.agent)
+        : []
       return [{
         type: 'proposal.add',
-        data: { id: String(r.id), agentId, title: p.entry, target: spec?.owner ?? NP, rationale: p.reason, before: spec?.shape ?? '', after: p.change, affects: [] },
+        data: { id: String(r.id), agentId, title: p.entry, target: spec?.owner ?? NP, rationale: p.reason, before: spec?.shape ?? '', after: p.change, affects },
       }]
     }
+    case 'proposal_decision':
+      // A human's Accept/Reject (backend/mcp.py /api/proposals/{id}). On accept the spec's
+      // shape now equals the proposal, so `before` is restored from the recorded previous
+      // shape to keep the diff meaningful.
+      return [{
+        type: 'proposal.update',
+        data: { id: String(p.proposal_id), status: p.status, by: agentId, title: p.entry, ...(p.previous_shape != null && { before: p.previous_shape }) },
+      }]
     case 'alert':
       // raise_alert and escalate_to_human both log type="alert", but with different payload
       // shapes (summary/affected/suggested_fix vs. question/escalated) -- without this branch,
       // an escalation's `affected`/`summary`/`suggested_fix` are all undefined and it renders
-      // as a blank card. See issue #13.
+      // as a blank card. See issue #13. The backend detects one conflict type (contract
+      // drift, SPEC.md) and has no severity scale, so `severity` is left unset.
       return [{
         type: 'alert.add',
         data: p.escalated
-          ? { id: String(r.id), type: 'escalation', severity: NP, agents: [], files: [], message: p.question }
-          : { id: String(r.id), type: NP, severity: NP, agents: p.affected ?? [], files: [], message: p.summary, suggestion: p.suggested_fix },
+          ? { id: String(r.id), type: 'escalation', agents: [], files: [], message: p.question }
+          : { id: String(r.id), type: 'drift', agents: p.affected ?? [], files: [], message: p.summary, suggestion: p.suggested_fix },
       }]
+    case 'alert_resolved':
+      return [{ type: 'alert.resolve', data: { id: String(p.alert_id), by: agentId } }]
     default: // check_conflicts, get_spec, checked_clean: feed only
       return [{ type: r.type, data: { agentId, ...p } }]
   }
 }
 
-function snapshot(db: DatabaseSync, rows: Row[]) {
+export function snapshot(db: DatabaseSync, rows: Row[]) {
   const specs = db.prepare('SELECT owner, consumers FROM spec').all() as any[]
-  const claims = db.prepare('SELECT agent, file, summary FROM claims').all() as any[]
+  // Oldest first, so the Map below ends up holding each agent's most recent intent.
+  const claims = db.prepare('SELECT agent, file, summary FROM claims ORDER BY claimed_at, rowid').all() as any[]
   // Files the spec knows about; a consumer depends on its contract's owner.
   const files = new Map<string, Set<string>>()
   const file = (path: string) => files.get(path) ?? files.set(path, new Set()).get(path)!
@@ -75,13 +104,25 @@ function snapshot(db: DatabaseSync, rows: Row[]) {
   claims.forEach((c) => file(c.file))
 
   const msgs = rows.flatMap((r) => translate(db, r).map((m) => ({ ...m, r })))
+  // Decisions are later rows than the proposals/alerts they refer to; fold them in so a
+  // freshly opened tab shows the same statuses a live one reached incrementally.
+  const decisions = new Map(msgs.filter((m) => m.type === 'proposal.update').map((m) => [m.data.id, m.data]))
+  const resolved = new Set(msgs.filter((m) => m.type === 'alert.resolve').map((m) => m.data.id))
+  const tasks = new Map(claims.map((c) => [c.agent, c.summary]))
+  const ts = (m: { r: Row }) => Date.parse(m.r.ts + 'Z')
   return {
-    agents: [...new Set([...claims.map((c) => c.agent), ...rows.map((r) => r.agent)])].map(agent),
+    agents: [...new Set([...claims.map((c) => c.agent), ...rows.map((r) => r.agent)])].filter((a) => !HIDDEN_AGENTS.has(a)).map((a) => agent(a, tasks.get(a))),
     files: [...files].map(([path, deps]) => ({ path, deps: [...deps] })),
     claims: claims.map((c) => ({ agentId: c.agent, path: c.file, intent: c.summary })),
-    proposals: msgs.filter((m) => m.type === 'proposal.add').map((m) => ({ ...m.data, ts: Date.parse(m.r.ts + 'Z') })).reverse(),
-    alerts: msgs.filter((m) => m.type === 'alert.add').map((m) => ({ ...m.data, ts: Date.parse(m.r.ts + 'Z') })).reverse(),
-    events: msgs.slice(-300).reverse().map((m, i) => ({ id: `${m.r.id}-${i}`, type: m.type, data: m.data, ts: Date.parse(m.r.ts + 'Z') })),
+    proposals: msgs
+      .filter((m) => m.type === 'proposal.add')
+      .map((m) => {
+        const d = decisions.get(m.data.id)
+        return { ...m.data, ...(d && { status: d.status, ...(d.before != null && { before: d.before }) }), ts: ts(m) }
+      })
+      .reverse(),
+    alerts: msgs.filter((m) => m.type === 'alert.add').map((m) => ({ ...m.data, status: resolved.has(m.data.id) ? 'resolved' : 'open', ts: ts(m) })).reverse(),
+    events: msgs.slice(-300).reverse().map((m, i) => ({ id: `${m.r.id}-${i}`, type: m.type, data: m.data, ts: ts(m) })),
   }
 }
 
@@ -111,7 +152,7 @@ function stream(req: IncomingMessage, res: ServerResponse) {
   // ponytail: one poll loop per open tab, share one loop if many dashboards connect
   const timer = setInterval(() => {
     for (const r of db.prepare('SELECT * FROM events WHERE id > ? ORDER BY id').all(lastId) as Row[]) {
-      if (!seenAgents.has(r.agent)) seenAgents.add(r.agent), send({ type: 'agent.upsert', data: agent(r.agent) })
+      if (!HIDDEN_AGENTS.has(r.agent) && !seenAgents.has(r.agent)) seenAgents.add(r.agent), send({ type: 'agent.upsert', data: agent(r.agent) })
       for (const m of translate(db, r)) {
         const path = m.type === 'claim.add' || m.type === 'file.touch' ? m.data.path : null
         if (path && !seenFiles.has(path)) seenFiles.add(path), send({ type: 'file.add', data: { path } })

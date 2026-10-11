@@ -1,5 +1,5 @@
 import { diffLines } from 'diff'
-import { useStore, agentColor, type Agent, type FeedEvent } from '../store'
+import { useStore, agentColor, alertLabel, type Agent, type FeedEvent } from '../store'
 
 // The three list pages. Each takes `limit` so the overview can show a slice of the same rows.
 
@@ -12,7 +12,7 @@ const STATUS_PILL: Record<string, string> = {
 type Filter = { limit?: number; agentId?: string }
 
 export function Changes({ limit, agentId, pendingOnly = false }: Filter & { pendingOnly?: boolean }) {
-  const { proposals, agents, selectedProposal, selectProposal, decideProposal } = useStore()
+  const { proposals, agents, selectedProposal, selectProposal, decideProposal, pending } = useStore()
   const list = proposals
     .filter((p) => (!pendingOnly || p.status === 'pending') && (!agentId || p.agentId === agentId))
     .slice(0, limit)
@@ -44,8 +44,8 @@ export function Changes({ limit, agentId, pendingOnly = false }: Filter & { pend
                 <Diff before={p.before} after={p.after} />
                 {p.status === 'pending' && (
                   <div className="mt-3 flex gap-2">
-                    <button onClick={() => decideProposal(p.id, 'accepted')} className="flex-1 rounded-lg bg-ink py-1.5 text-sm font-medium text-ink-fg transition-opacity hover:opacity-80">Accept</button>
-                    <button onClick={() => decideProposal(p.id, 'rejected')} className="flex-1 rounded-lg bg-surface py-1.5 text-sm font-medium transition-opacity hover:opacity-80">Reject</button>
+                    <button disabled={!!pending[p.id]} onClick={() => decideProposal(p.id, 'accepted')} className="flex-1 rounded-lg bg-ink py-1.5 text-sm font-medium text-ink-fg transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-50">Accept</button>
+                    <button disabled={!!pending[p.id]} onClick={() => decideProposal(p.id, 'rejected')} className="flex-1 rounded-lg bg-surface py-1.5 text-sm font-medium transition-opacity hover:opacity-80 disabled:cursor-wait disabled:opacity-50">Reject</button>
                   </div>
                 )}
               </div>
@@ -77,7 +77,7 @@ function Diff({ before = '', after = '' }) {
 }
 
 export function Alerts({ limit, agentId, openOnly = false }: Filter & { openOnly?: boolean }) {
-  const { alerts, agents, resolveAlert, selectFile, setPage } = useStore()
+  const { alerts, agents, resolveAlert, selectFile, setPage, pending } = useStore()
   const list = [...alerts]
     .sort((a, b) => (a.status === 'open' ? -1 : 1) - (b.status === 'open' ? -1 : 1))
     .filter((a) => (!openOnly || a.status === 'open') && (!agentId || a.agents.includes(agentId)))
@@ -90,8 +90,8 @@ export function Alerts({ limit, agentId, openOnly = false }: Filter & { openOnly
         return (
           <li key={al.id} className={`px-4 py-3 ${done ? 'opacity-50' : ''}`}>
             <div className="flex items-center gap-2 text-xs">
-              <span className="font-semibold">{al.type === 'collision' ? 'Collision' : 'Context drift'}</span>
-              <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-muted">{al.severity}</span>
+              <span className="font-semibold">{alertLabel(al.type)}</span>
+              {al.severity && <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] text-muted">{al.severity}</span>}
               <span className="ml-auto text-faint">{new Date(al.ts).toLocaleTimeString()}</span>
             </div>
             <p className="mt-1.5 text-sm">{al.message}</p>
@@ -114,8 +114,8 @@ export function Alerts({ limit, agentId, openOnly = false }: Filter & { openOnly
               ))}
             </div>
             {!done && (
-              <button onClick={() => resolveAlert(al.id)} className="mt-2 text-xs text-muted hover:text-fg">
-                Mark resolved
+              <button disabled={!!pending[al.id]} onClick={() => resolveAlert(al.id)} className="mt-2 text-xs text-muted hover:text-fg disabled:cursor-wait disabled:opacity-50">
+                {pending[al.id] ? 'Resolving…' : 'Mark resolved'}
               </button>
             )}
           </li>
@@ -134,9 +134,9 @@ function describe(e: FeedEvent, agents: Record<string, Agent>): [string | null, 
     case 'claim.add': return [d.agentId, `${name(d.agentId)} claimed ${d.path}`]
     case 'claim.release': return [d.agentId, `${name(d.agentId)} released ${d.path}`]
     case 'proposal.add': return [d.agentId, `${name(d.agentId)} proposed ${d.title}`]
-    case 'proposal.update': return [null, `Proposal ${d.id} ${d.status}`]
-    case 'alert.add': return [null, `${d.type}: ${d.message}`]
-    case 'alert.resolve': return [null, `Alert ${d.id} resolved`]
+    case 'proposal.update': return [null, `${d.by ?? 'A human'} ${d.status} ${d.title ?? `proposal ${d.id}`}`]
+    case 'alert.add': return [null, `${alertLabel(d.type)}: ${d.message}`]
+    case 'alert.resolve': return [null, `${d.by ?? 'A human'} resolved alert ${d.id}`]
     case 'file.add': return [null, `New file ${d.path}`]
     default: return [d.agentId, `${name(d.agentId)} ${e.type}`]
   }

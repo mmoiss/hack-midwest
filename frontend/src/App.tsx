@@ -11,6 +11,23 @@ import AlertBanner from './components/AlertBanner'
 
 const TITLES: Partial<Record<Page, string>> = { changes: 'Changes', alerts: 'Alerts', feed: 'Feed' }
 
+// A failed human decision (Accept/Reject/Mark resolved could not reach the Python server).
+// The list keeps its old state, so the person can simply try again.
+function Notice() {
+  const { notice, dismissNotice } = useStore()
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(dismissNotice, 6000)
+    return () => clearTimeout(t)
+  }, [notice, dismissNotice])
+  if (!notice) return null
+  return (
+    <button onClick={dismissNotice} className="absolute bottom-4 left-1/2 z-20 -translate-x-1/2 rounded-xl border border-line bg-canvas px-4 py-2 text-xs text-danger shadow-lg">
+      {notice}
+    </button>
+  )
+}
+
 export default function App() {
   const { theme, page } = useStore()
   useEffect(connectLive, [])
@@ -23,6 +40,7 @@ export default function App() {
       <Sidebar />
       <main className="relative flex min-w-0 flex-1 flex-col">
         <AlertBanner />
+        <Notice />
         {page === 'map' ? (
           <ReactFlowProvider>
             <CodebaseMap />
