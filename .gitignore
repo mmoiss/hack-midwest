@@ -21,3 +21,4 @@ data/
 # first place. This rule only covers a throwaway .mcp.json someone creates elsewhere
 # (e.g. at the repo root) that should never be tracked to begin with.
 .mcp.json
+demo-repo-template/.mcp.json
