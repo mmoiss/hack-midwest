@@ -110,6 +110,11 @@ short; it adds about a minute.
 - **Do not start bob until the alert is on screen.** The verdict takes 8 to 18 seconds.
 - **Repeated saves to `users.py` re-raise the same alert** until a proposal is accepted. That
   is by design; do not save twice.
+- **Antivirus HTTPS scanning.** If `demo status` is fine but Claude Code says the MCP server
+  "connection timed out (CONNECT_TIMEOUT)", the laptop's antivirus is intercepting HTTPS
+  (Norton Web Shield did this on 2026-10-11). Exclude `172-237-146-90.sslip.io` from its SSL
+  scanning, or see INTEGRATION.md for the SSH-tunnel workaround. Codex keeps working but logs
+  `rmcp` errors; ignore those.
 - **Wifi.** Everything is on the VM. If the venue network dies, run the whole stack on the
   presenting laptop (`python -m backend.mcp` from the repo root, `npm run dev` in `frontend/`),
   and in each clone's `.env` switch the two URLs to `http://127.0.0.1:8000/...`.
