@@ -83,10 +83,10 @@ agent(prompt)   # no tool call means the edit was clean — logged as "checked_c
 
 | Doc | What it covers |
 |---|---|
-| [SPEC.md](SPEC.md) | The master spec: scope, architecture, coordinator design, demo script |
-| [CONTRACT.md](CONTRACT.md) | The frozen interfaces: MCP tools, `/events`, schema, guarantees |
+| [SPEC.md](docs/SPEC.md) | The master spec: scope, architecture, coordinator design, demo script |
+| [CONTRACT.md](docs/CONTRACT.md) | The frozen interfaces: MCP tools, `/events`, schema, guarantees |
 | [SETUP.md](SETUP.md) | Standing it up: laptops, tokens, the VM from scratch, the 60-second local run |
-| [INTEGRATION.md](INTEGRATION.md) | What is live, what was verified, redeploy runbook, traps that cost time |
-| [DEMO.md](DEMO.md) | The three-minute, two-laptop demo runbook |
+| [INTEGRATION.md](docs/INTEGRATION.md) | What is live, what was verified, redeploy runbook, traps that cost time |
+| [DEMO.md](docs/DEMO.md) | The three-minute, two-laptop demo runbook |
 
 > *Skeg keeps developers smooth sailing ⛵⛵⛵⛵*
