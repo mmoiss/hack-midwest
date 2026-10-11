@@ -214,15 +214,19 @@ should come back attributed to whoever owns that token, not to any name the agen
 ## 5. Running the server and dashboard together on one laptop
 
 This is the offline fallback SPEC.md calls for if venue wifi fails, and it's also how you'd
-rehearse the dashboard locally before a Linode box exists. Two processes, run from the repo
-root and `frontend/` respectively:
+rehearse the dashboard locally before a Linode box exists — or how anyone sees Skeg running
+in about 60 seconds: three commands, no Docker, no model keys.
 
 ```bash
-python -m backend.mcp        # from the repo root
+python backend/seed.py       # once: the two demo contracts into coordinator.db
+python -m backend.mcp        # from the repo root — MCP tools, /events and /api on :8000
 ```
 ```bash
-npm run server                # from frontend/
+npm install && npm run dev    # from frontend/ — dashboard on :5173, SSE feed and /api proxy built in
 ```
+
+(`npm run server` from `frontend/` runs just the SSE feed standalone on :3001 instead of the
+full dev server, if that is all you need.)
 
 **Both must agree on where `coordinator.db` is.** With no `DB_PATH` set anywhere, they now
 default to the same file (`<repo-root>/coordinator.db`) — fixed as part of #13; previously
@@ -230,8 +234,8 @@ the dashboard defaulted to a different, nonexistent path and would silently show
 while the server worked fine. If you do set `DB_PATH` (for either `.env`), set it to the
 same value in both — see the comments in `.env.example` and `frontend/.env.example`.
 
-To confirm it's actually wired up: run `python backend/seed.py` once, then open the
-dashboard (`npm run dev` in `frontend/`) and confirm the two contracts' files appear on
-the Map (seed.py writes no agents or events; those only come from real tool calls). An
+To confirm it's actually wired up: open the dashboard and confirm the two contracts' files
+appear on the Map (seed.py writes no agents or events; those only come from real tool
+calls). An
 empty dashboard with a server that starts cleanly is the exact symptom of a `DB_PATH`
 mismatch, not a crash you'd notice otherwise.
