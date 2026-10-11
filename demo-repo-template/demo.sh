@@ -63,7 +63,9 @@ case "$cmd" in
         exec claude -p "$*" --output-format text \
           --allowedTools "Read,Edit,Write,Glob,Grep,mcp__team-coordinator__declare_intent,mcp__team-coordinator__check_conflicts,mcp__team-coordinator__get_spec,mcp__team-coordinator__propose_spec_change"
       else
-        exec codex exec "$*" --dangerously-bypass-hook-trust --dangerously-bypass-approvals-and-sandbox
+        # stdin closed: `codex exec` otherwise waits to "read additional input from stdin"
+        # whenever stdin is not a terminal (CI, a script, another tool) and never starts.
+        exec codex exec "$*" --dangerously-bypass-hook-trust --dangerously-bypass-approvals-and-sandbox < /dev/null
       fi
     fi
     exec "$agent"
