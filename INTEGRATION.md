@@ -172,6 +172,33 @@ reported success, the `spec` table stayed empty, and no edit ever reached the co
 a silent failure that looks like a broken coordinator. Fixed; `/health` reporting
 `"events": 0` after a seed is the tell if it ever regresses.
 
+**Antivirus HTTPS scanning on a laptop breaks MCP to the VM, and looks like a server fault.**
+Symptom: Claude Code reports `MCP server team-coordinator connection timed out after 30000ms
+(CONNECT_TIMEOUT)` against the VM, while `/health`, `/events`, the dashboard and curl all work,
+and the app log shows initialize/tools/list answered 200. Codex on the same laptop still works
+but logs `rmcp ... error decoding response body` repeatedly. Cause, found 2026-10-11: Norton
+"Web/Mail Shield" (and any product that intercepts TLS) re-encrypts the connection and rewrites
+the MCP server's empty `202 Accepted` for notifications into a chunked response whose end never
+arrives; Claude Code's client waits for it. Check from the affected laptop:
+
+```bash
+openssl s_client -connect 172-237-146-90.sslip.io:443 -servername 172-237-146-90.sslip.io </dev/null 2>/dev/null | openssl x509 -noout -issuer
+# healthy: issuer=C = US, O = Let's Encrypt, ...     intercepted: issuer=... Norton Web/Mail Shield ...
+```
+
+Fix on that laptop: exclude the host from the antivirus's HTTPS/SSL scanning (Norton: Settings →
+Firewall → Intrusion and Browser Protection → SSL/TLS scanning exclusions, or turn off Web Shield's
+HTTPS scanning for the demo). Workaround with no settings change: an SSH tunnel to the app
+container, plain HTTP, then point `.env` at it — proven to connect Claude Code first try:
+
+```bash
+ssh -N -L 18000:$(ssh root@172.237.146.90 "docker inspect coordinator-app-1 --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'"):8000 root@172.237.146.90 &
+# .env: TEAM_MCP_URL=http://127.0.0.1:18000/mcp   TEAM_EVENTS_URL=http://127.0.0.1:18000/events
+```
+
+Nothing on the server fixes this: Caddy 2.10 and 2.11, with and without `flush_interval`, behave
+identically, and the same request from the VM itself completes in 40 ms.
+
 **A changed Caddyfile is invisible to the running Caddy, and `caddy reload` says "config is
 unchanged".** `compose.yaml` bind-mounts `./Caddyfile` as a single file. `git pull` writes the
 new version as a new inode, and the container keeps the old one, so `caddy reload` re-reads the

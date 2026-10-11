@@ -15,9 +15,10 @@
 	# The Python server owns these three paths.
 	handle /mcp* {
 		reverse_proxy app:8000 {
-			# MCP streamable HTTP answers POSTs with text/event-stream. Buffered, Codex's
-			# client (rmcp/reqwest) fails with "error decoding response body" and loses every
-			# tool; Claude Code's client happened to tolerate it. Same setting as /api/stream.
+			# MCP streamable HTTP answers POSTs with text/event-stream; stream it like
+			# /api/stream rather than buffering. (If an agent cannot connect from a laptop
+			# while curl from the VM works, suspect TLS inspection on that laptop, not this:
+			# see INTEGRATION.md, "Antivirus HTTPS scanning breaks MCP".)
 			flush_interval -1
 		}
 	}
