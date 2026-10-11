@@ -24,32 +24,24 @@ server for yours. Never put one in a tracked file.
    cp -r demo-repo-template demo-repo && cd demo-repo
    git init -q && git add -A && git commit -q -m demo-seed && git tag demo-seed
    ```
-2. Check `python3 --version` works in the shell you will use. Both hook configs call
+2. `cp .env.example .env` and paste your token into it: `CLAUDE_TEAM_TOKEN=` for Claude
+   Code, `CODEX_TEAM_TOKEN=` for Codex. The server URLs are already filled in.
+3. Check `python3 --version` works in the shell you will use. Both hook configs call
    `python3`; if it fails (stock Windows), change it to `python` in `.claude/settings.json`
    and `.codex/hooks.json`.
-3. Codex only: in `.codex/config.toml` set `url = "https://172-237-146-90.sslip.io/mcp"`.
-   That file does no env-var substitution.
+
+That is all. No variables to export, no config file to edit: the launcher does both.
 
 ## Each laptop, every session
 
-Export before launching the agent, in the shell you launch it from. Neither CLI reads
-`.env` files.
-
-```bash
-# Laptop A, Claude Code as alice
-export CLAUDE_TEAM_TOKEN=<alice's token>
-export TEAM_MCP_URL=https://172-237-146-90.sslip.io/mcp
-export TEAM_EVENTS_URL=https://172-237-146-90.sslip.io/events
-claude
-
-# Laptop B, Codex as bob
-export CODEX_TEAM_TOKEN=<bob's token>
-export TEAM_EVENTS_URL=https://172-237-146-90.sslip.io/events
-codex
+```
+./demo.sh up          Git Bash, macOS, Linux
+.\demo.ps1 up         PowerShell
 ```
 
-Smoke test before any prompt, from each laptop:
-`curl https://172-237-146-90.sslip.io/health`
+It prints which CLI it is launching and who the server says you are, then opens the agent
+connected to the server. If it says the token was rejected, fix `.env` and run
+`./demo.sh status`.
 
 ## The prompts
 
@@ -87,16 +79,15 @@ is judged clean against the new shape.
 
 ## Reset between rehearsals
 
-On the VM (`ssh root@172.237.146.90`, then `cd /opt/coordinator`):
+On every laptop that took part:
 
-```bash
-docker compose exec app python backend/seed.py
-docker compose exec app python -c "import sqlite3; c=sqlite3.connect('/app/data/coordinator.db'); c.executemany(\"INSERT INTO claims VALUES (?,?,?,datetime('now'))\", [('alice','backend/api/users.py','Owns GET /users/{id}'),('bob','frontend/src/components/UserCard.tsx','Renders user name and email')]); c.commit()"
+```
+./demo.sh reset       or  .\demo.ps1 reset
 ```
 
-On each laptop: `git reset --hard demo-seed && git clean -fd`
-
-The claims matter. Without bob's, the alert names a file path instead of him.
+The first one to run it resets the server too (contracts restored, events cleared, alice's
+and bob's claims back in place); the others just reset their own clone. Nobody needs SSH.
+Then reload the dashboard page.
 
 ## The live demo, three minutes
 
@@ -120,5 +111,5 @@ short; it adds about a minute.
 - **Repeated saves to `users.py` re-raise the same alert** until a proposal is accepted. That
   is by design; do not save twice.
 - **Wifi.** Everything is on the VM. If the venue network dies, run the whole stack on the
-  presenting laptop (`python -m backend.mcp` from the repo root, `npm run dev` in `frontend/`)
-  and point both agents at `http://127.0.0.1:8000`.
+  presenting laptop (`python -m backend.mcp` from the repo root, `npm run dev` in `frontend/`),
+  and in each clone's `.env` switch the two URLs to `http://127.0.0.1:8000/...`.
