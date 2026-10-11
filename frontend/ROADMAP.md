@@ -38,6 +38,7 @@ npm run dev                      # connects to FastAPI on localhost:8000 via the
 | Agent colors (stripes, markers, hover spotlight) | `Sidebar.tsx`, `AgentPage.tsx`, `CodebaseMap.tsx` | ✅ |
 | Proposed changes page with a diff for each change | `Lists.tsx` → `Changes`, `Diff` | ✅ |
 | Collision and drift signals (rings, banner, cards) | `CodebaseMap.tsx`, `AlertBanner.tsx`, `Lists.tsx` → `Alerts` | ✅ |
+| "Needs your decision" banner when a proposal arrives, opening it on Changes | `AlertBanner.tsx`, `store.ts` → `lastProposal`, `openProposal` | ✅ |
 | Live event feed | `Lists.tsx` → `Feed` | ✅ |
 | Sidebar navigation and overview landing page | `Sidebar.tsx`, `Overview.tsx` | ✅ |
 | SSE client with reconnect, live/offline pill | `src/live.ts`, `Sidebar.tsx` | ✅ |
