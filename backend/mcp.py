@@ -17,6 +17,7 @@ import time
 
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_headers
+from starlette.background import BackgroundTask
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -161,7 +162,8 @@ def judge_edit(diff: str, spec_entry: sqlite3.Row, agent: str) -> None:
 
     The adapter between /events and backend/coordinator.py. In-process rather than a
     sibling service, so there is exactly one SQLite writer and no cross-process lock
-    contention.
+    contention. Runs on a worker thread after the /events response has gone out (see
+    handle_events), never on the event loop: a model round trip is 15-30 s.
 
     SQLite stores `consumers` and `shape` as JSON text, while run_coordinator expects
     them parsed — it json.dumps() the shape and iterates consumers as a list. A raw
@@ -340,10 +342,23 @@ async def handle_events(request: Request) -> JSONResponse:
     conn.close()
 
     # The deterministic filter: only a file that owns a contract is worth a model call.
+    #
+    # The judgement is scheduled as a BackgroundTask, which Starlette runs on a worker
+    # thread AFTER the response has been sent. It used to be called inline, which lost
+    # alerts in rehearsal for two compounding reasons:
+    #   1. A model round trip takes 15-30 s, but hooks/report_edit.py gives up after 5 s.
+    #      The response never reached the hook -- yet fetch_undelivered_alerts() below had
+    #      already stamped the alerts it carried as delivered, so they were gone for good.
+    #   2. judge_edit is synchronous, so calling it from this async handler froze the whole
+    #      event loop: every other agent's hook and MCP call stalled for the duration and
+    #      timed out the same way, whether or not it touched a contract.
+    # The editing agent never needs the verdict in its own response: an alert names the
+    # consumers' claimants, who receive it on their next call, once it exists.
+    background = None
     if owner_row is not None and should_run_coordinator(file):
-        judge_edit(diff, owner_row, agent)
+        background = BackgroundTask(judge_edit, diff, owner_row, agent)
 
-    return JSONResponse({"alerts": fetch_undelivered_alerts(agent)})
+    return JSONResponse({"alerts": fetch_undelivered_alerts(agent)}, background=background)
 
 
 def _decider(request: Request) -> str:

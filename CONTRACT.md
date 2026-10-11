@@ -35,6 +35,8 @@ Authorization: Bearer <token>
 
 Every alert returned is marked delivered **to that agent**. This is the only channel that gets information back into a running agent — there is no server-to-agent push.
 
+The response is sent **before** the coordinator judges the edit. A contract-owning edit schedules the judgement on a worker thread once the response has gone out, so `/events` answers in milliseconds whether or not a model call follows. This matters because the hook script waits at most 5 seconds: judging inline (15–30 s) meant the hook timed out, the response carrying any pending alerts was never read, and those alerts had already been marked delivered — lost. It also kept the event loop free, so other agents' hooks and MCP calls are not stalled while one edit is being judged. The editing agent does not need the verdict in its own response; the alert names the consumers' claimants, who get it on their next call.
+
 The `agent` field in the body is accepted and ignored. Identity comes from the bearer token, exactly as it does for the tools, so a hook cannot report an edit as somebody else. Hook scripts may keep sending it; nothing reads it.
 
 Malformed input is rejected before anything is logged: unknown or missing token → `401`, a body that is not JSON or has no `file` → `400`.
@@ -116,7 +118,7 @@ Unknown id, or an id of the wrong row type, is `404`; a body without a valid `st
 
 ## Coordinator boundary
 
-The coordinator runs **in-process**, imported by the server, not as a sibling service. One SQLite writer, no cross-process lock contention, and strictly less to build. `/events` calls it only after the deterministic filter (does this file own a contract?) and a 5-second per-file debounce both pass, so routine edits never reach the team's shared quota.
+The coordinator runs **in-process**, imported by the server, not as a sibling service. One SQLite writer, no cross-process lock contention, and strictly less to build. `/events` calls it only after the deterministic filter (does this file own a contract?) and a 5-second per-file debounce both pass, so routine edits never reach the team's shared quota — and only after its response has been sent, on a worker thread, so the hook's 5-second timeout and the event loop are never held up by a model call.
 
 Two functions, one on each side of the seam:
 
