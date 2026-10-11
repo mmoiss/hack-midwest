@@ -175,6 +175,15 @@ a silent failure that looks like a broken coordinator. Fixed; `/health` reportin
 **An empty `spec` table means drift can never fire.** `/events` only calls the coordinator
 for files that *own* a contract. Run the seed after any fresh deploy.
 
+**Anything `coordinator.py` imports directly must be in `requirements.txt`.** It is not
+enough that the package resolves transitively today. `judge_edit` wraps the whole coordinator
+call — including `from backend.coordinator import run_coordinator` — in a blanket
+`except Exception`, deliberately, so a model outage cannot turn a hook into a `500`. The side
+effect is that an `ImportError` is swallowed too, and a missing dependency looks exactly like
+a clean "no drift found" verdict: every edit passes silently, with nothing but one line in the
+container log to say otherwise. `python-dotenv` and `pydantic` are declared explicitly for
+this reason; add any future direct import the same way.
+
 ---
 
 ## 5. Verified, and not
@@ -203,17 +212,35 @@ test: plain completion 2.9s, tool call 3.4s, 368 tokens. The structured-output f
   open door. Set the default inbound policy to DROP with ACCEPT rules for 22/80/443 to close
   it.
 - The dashboard service and its Caddy route are not deployed.
-- `coordinator.py` imports `dotenv` but `python-dotenv` is not declared in
-  `requirements.txt`. It resolves transitively today, so this works — it is one `pip`
-  resolution away from not working.
+- The Cloud Firewall gap above is the only outstanding dependency-or-config risk; the
+  undeclared-import problem that used to sit here is fixed — see the trap below.
 
 ---
 
 ## 6. Redeploying
 
+**Merging on GitHub does not redeploy anything.** The VM keeps running whatever was last
+`git pull`'d and `docker compose up --build`'d on it, regardless of what `main` looks like
+on GitHub. **After merging any PR that touches `backend/` or `deploy/`, the steps below are
+mandatory, not optional** — §5's "Verified in production" claims are only true for whatever
+commit was actually deployed *when that section was written*, not for `main` as it stands
+now. It's entirely possible to merge a fix, believe it's live, and be wrong because nobody
+actually logged in and updated the box.
+
+**Pre-flight — confirm what's actually running before trusting anything in §5:**
+
 ```bash
 ssh root@172.237.146.90
 cd /opt/coordinator
+git log -1          # or: git status
+```
+
+Compare that commit against `main`'s current `HEAD` on GitHub. If they don't match, treat
+§5's verification results as describing that old commit, not `main`.
+
+**Redeploy:**
+
+```bash
 git pull origin <branch>
 docker compose up -d --build        # never `down -v`
 curl -s https://172-237-146-90.sslip.io/health
@@ -225,3 +252,30 @@ demo to its starting state:
 ```bash
 docker compose exec app python backend/seed.py
 ```
+
+**Last confirmed run of this checklist: 2026-10-10, closing out #15.** The box was found
+sitting on `feat/wire-coordinator-to-events`@`bc99688` — 9 commits behind `main`, missing
+`f8a7621` (the `seed.py` `DB_PATH` fix). That's not a hypothetical: it meant a seed run on
+the box as it stood would have silently written to the wrong file, leaving `spec` empty, and
+per `CONTRACT.md` an empty `spec` table means drift can never fire. Brought current:
+
+```
+git checkout main && git pull origin main   # -> 8670226
+docker compose up -d --build
+docker compose exec app python backend/seed.py
+curl -s https://172-237-146-90.sslip.io/health   # "events": 12 -- matches seed.py's row count exactly
+```
+
+Then re-ran the actual drift smoke test against the now-current server — a real `/events`
+POST (not a fixture) removing `email` from `backend/api/users.py`, judged by the real
+Akamai `hackathon-chat` model:
+
+```
+(13, alice, edit,      {"file": "backend/api/users.py", "diff": "... -\"email\": user.email, ..."})
+(14, coordinator, alert, {"summary": "The GET /users/{id} response no longer includes the required \"email\" field...",
+                          "affected": ["frontend/src/api/client.ts", "bob"], "suggested_fix": "Restore the \"email\": user.email entry..."})
+```
+
+Correct on every count: `client.ts` has no claim so it fell back to its path, `bob` resolved
+from his claim on `UserCard.tsx`, and the model correctly caught the break. `main`@`8670226`
+is confirmed working end to end on the live server, not just on a branch or a local fixture.
