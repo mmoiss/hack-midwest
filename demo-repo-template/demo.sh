@@ -74,7 +74,7 @@ case "$cmd" in
     git reset -q --hard demo-seed && git clean -fdq && echo "demo: clone reset to demo-seed"
     out="$(api POST /api/reset)"; code="${out##*$'\n'}"; body="${out%$'\n'*}"
     [ "$code" = 200 ] || die "server reset failed (HTTP $code): $body"
-    echo "demo: server reset by $(printf '%s' "$body" | sed -n 's/.*"by": *"\([^"]*\)".*/\1/p'): contracts restored, events cleared, ogo/sandi claims in place"
+    echo "demo: server reset by $(printf '%s' "$body" | sed -n 's/.*"by": *"\([^"]*\)".*/\1/p'): contracts restored, events cleared, team claims in place"
     ;;
   status)
     name="$(whoami_name || true)"
