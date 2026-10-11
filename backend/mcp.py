@@ -157,6 +157,34 @@ def should_run_coordinator(file: str) -> bool:
     return last is None or (now - last) > DEBOUNCE_SECONDS
 
 
+def pending_proposal_for(contract: str) -> dict | None:
+    """The newest propose_spec_change for this contract that no human has decided yet.
+
+    Handed to the coordinator as context, so a breaking edit that matches a proposal
+    already waiting on the dashboard is escalated as a decision for a human rather than
+    alerted as unexplained drift. Without it the coordinator only ever sees the diff and
+    the shape, and SPEC.md's "deliberate contract change" outcome can never happen.
+    """
+    conn = get_db()
+    try:
+        decided = {
+            json.loads(row["payload"]).get("proposal_id")
+            for row in conn.execute("SELECT payload FROM events WHERE type = 'proposal_decision'")
+        }
+        rows = conn.execute(
+            "SELECT id, agent, payload FROM events WHERE type = 'propose_spec_change' ORDER BY id DESC"
+        ).fetchall()
+    finally:
+        conn.close()
+    for row in rows:
+        if row["id"] in decided:
+            continue
+        proposal = json.loads(row["payload"])
+        if proposal.get("entry") == contract:
+            return {"id": row["id"], "agent": row["agent"], "change": proposal.get("change", ""), "reason": proposal.get("reason", "")}
+    return None
+
+
 def judge_edit(diff: str, spec_entry: sqlite3.Row, agent: str) -> None:
     """Hand one edit to the coordinator, which decides whether it breaks the contract.
 
@@ -183,6 +211,7 @@ def judge_edit(diff: str, spec_entry: sqlite3.Row, agent: str) -> None:
                 "consumers": json.loads(spec_entry["consumers"]),
                 "shape": json.loads(spec_entry["shape"]),
             },
+            pending_proposal=pending_proposal_for(spec_entry["contract"]),
         )
     except Exception as exc:
         # /events is an agent's only channel for pending alerts, so a missing API key, a

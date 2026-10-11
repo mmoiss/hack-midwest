@@ -127,10 +127,12 @@ Two functions, one on each side of the seam:
 def judge_edit(diff: str, spec_entry: sqlite3.Row, agent: str) -> None
 
 # backend/coordinator.py — the Strands agent
-def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False) -> None
+def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False, pending_proposal: dict | None = None) -> None
 ```
 
 `spec_entry` is the one `spec` row the edited file owns — `contract`, `owner`, `consumers`, `shape` — already fetched, so the coordinator never queries for context. `consumers` holds file paths, which `run_coordinator` resolves against `claims` into teammate names itself; the caller does not do that lookup.
+
+`pending_proposal` is the newest `propose_spec_change` for that contract with no `proposal_decision` yet (`{id, agent, change, reason}`), looked up by `judge_edit` (`pending_proposal_for`). It is the one piece of context that lets the coordinator tell a deliberate change from drift: an edit that moves the response toward a proposed shape awaiting approval is escalated with `escalate_to_human` (a "Human decision" card on the dashboard, answered by Accept/Reject on the Changes page) instead of alerting the consumers' owners.
 
 **`judge_edit` exists to convert, not to delegate.** SQLite stores `consumers` and `shape` as JSON *text*, and `run_coordinator` needs them parsed — it `json.dumps()` the shape and iterates consumers as a list. Passing a raw `sqlite3.Row` through would hand it a string where a list belongs.
 

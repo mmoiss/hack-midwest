@@ -3,8 +3,9 @@
     python -m pytest backend/test_dashboard_routes.py      # from the repo root
     python -m backend.test_dashboard_routes                # same, without pytest
 
-Runs the FastMCP app in-process against a throwaway SQLite file seeded with
-backend/seed.py's rows, so no server, token file or model key is needed. The point of
+Runs the FastMCP app in-process against a throwaway SQLite file holding seed.py's two
+contracts plus the few claims/events the cases need, so no server, token file or model
+key is required. The point of
 these: Accept is the only thing allowed to rewrite spec.shape (CONTRACT.md), and a resolved
 alert must stop reaching agents through /events and check_conflicts.
 """
@@ -24,12 +25,35 @@ ROOT = Path(__file__).resolve().parent.parent
 TOKENS = {"tok_alice": {"name": "alice", "color": "#c8794a"}, "tok_bob": {"name": "bob", "color": "#7a9a6e"}}
 
 
+SPLIT_SHAPE = json.dumps({"id": "int", "first_name": "string", "last_name": "string", "email": "string"}, indent=2)
+
+
 def seed(db_path: str) -> None:
-    """Run backend/seed.py against db_path (it honours DB_PATH)."""
+    """backend/seed.py's contracts, plus the rows these cases refer to by id.
+
+    ids: 7 = alice's proposal for GET /users/{id}; 8 = alert naming alice+bob;
+    10 = alert naming alice+carol. seed.py itself writes no claims or events.
+    """
     import runpy
 
     os.environ["DB_PATH"] = db_path
     runpy.run_path(str(ROOT / "backend" / "seed.py"), run_name="__main__")
+    conn = sqlite3.connect(db_path)
+    conn.executemany(
+        "INSERT INTO claims VALUES (?, ?, ?, datetime('now'))",
+        [("alice", "backend/api/users.py", "Return first_name/last_name"), ("bob", "frontend/src/components/UserCard.tsx", "Render user name in card")],
+    )
+    rows = {
+        7: ("alice", "propose_spec_change", {"entry": "GET /users/{id}", "change": SPLIT_SHAPE, "reason": "Needed for localized greetings."}),
+        8: ("coordinator", "alert", {"summary": "Bob's UserCard reads `user.name`, which Alice's pending contract change removes.", "affected": ["alice", "bob"], "suggested_fix": "Render first_name + last_name."}),
+        10: ("coordinator", "alert", {"summary": "Carol started editing users.py, which Alice has claimed.", "affected": ["alice", "carol"], "suggested_fix": "Wait for Alice."}),
+    }
+    conn.executemany(
+        "INSERT INTO events (id, agent, type, payload) VALUES (?, ?, ?, ?)",
+        [(i, a, t, json.dumps(p)) for i, (a, t, p) in rows.items()],
+    )
+    conn.commit()
+    conn.close()
 
 
 class DashboardRoutes(unittest.TestCase):
@@ -73,6 +97,13 @@ class DashboardRoutes(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         return r.json()["alerts"]
 
+    def test_0_pending_proposal_lookup(self):
+        # Proposal 7 is for GET /users/{id} and nobody has decided it yet.
+        pending = self.mcp.pending_proposal_for("GET /users/{id}")
+        self.assertEqual((pending["id"], pending["agent"]), (7, "alice"))
+        self.assertIn("first_name", pending["change"])
+        self.assertIsNone(self.mcp.pending_proposal_for("GET /orders"))
+
     def test_1_validation(self):
         self.assertEqual(self.client.post("/api/proposals/7", json={"status": "maybe"}).status_code, 400)
         self.assertEqual(self.client.post("/api/proposals/7", content=b"not json").status_code, 400)
@@ -83,7 +114,7 @@ class DashboardRoutes(unittest.TestCase):
         self.assertEqual(self.events("alert_resolved", "proposal_decision"), [], "nothing logged for rejected input")
 
     def test_2_resolve_alert_stops_delivery(self):
-        # Seeded alert 8 names alice and bob; alert 10 names alice and carol. bob gets 8 first.
+        # Alert 8 names alice and bob; alert 10 names alice and carol. bob gets 8 first.
         self.assertEqual([a["affected"] for a in self.hook("tok_bob")], [["alice", "bob"]])
 
         r = self.client.post("/api/alerts/8/resolve")
@@ -119,6 +150,7 @@ class DashboardRoutes(unittest.TestCase):
         r = self.client.post("/api/proposals/7", json={"status": "rejected"})
         self.assertEqual(r.status_code, 409, "a proposal is decided once")
         self.assertEqual(self.shape("GET /users/{id}"), after)
+        self.assertIsNone(self.mcp.pending_proposal_for("GET /users/{id}"), "decided proposals are no longer pending")
 
     def test_4_free_text_change_cannot_be_accepted(self):
         conn = sqlite3.connect(self.db)
