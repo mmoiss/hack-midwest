@@ -37,14 +37,14 @@ SPEC = [
 ]
 
 # The two claims the scripted demo moment depends on: the coordinator names the teammate
-# who claimed a consumer file, so without matthew's claim the alert says "UserCard.tsx"
-# instead of "matthew". POST /api/reset (backend/mcp.py) re-establishes these;
+# who claimed a consumer file, so without sandi's claim the alert says "UserCard.tsx"
+# instead of "sandi". POST /api/reset (backend/mcp.py) re-establishes these;
 # `python backend/seed.py` does not, so a fresh deploy starts with no claims until agents
 # declare intent. The names must match the ones TEAM_TOKENS was generated with
 # (scripts/make_tokens.py aruneem matthew sandi ogo), or the claims resolve to nobody.
 DEMO_CLAIMS = [
-    ("aruneem", "backend/api/users.py", "Owns GET /users/{id}"),
-    ("matthew", "frontend/src/components/UserCard.tsx", "Renders user name and email"),
+    ("ogo", "backend/api/users.py", "Owns GET /users/{id}"),
+    ("sandi", "frontend/src/components/UserCard.tsx", "Renders user name and email"),
 ]
 
 

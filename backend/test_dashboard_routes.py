@@ -183,7 +183,7 @@ class DashboardRoutes(unittest.TestCase):
 
         conn = sqlite3.connect(self.db)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], 0)
-        self.assertEqual(conn.execute("SELECT agent, file FROM claims ORDER BY agent").fetchall(), [("aruneem", "backend/api/users.py"), ("matthew", "frontend/src/components/UserCard.tsx")])
+        self.assertEqual(conn.execute("SELECT agent, file FROM claims ORDER BY agent").fetchall(), [("ogo", "backend/api/users.py"), ("sandi", "frontend/src/components/UserCard.tsx")])
         conn.close()
         self.assertIn('"email"', self.shape("GET /users/{id}"), "the accepted proposal from test_3 is rolled back to the seed shape")
         self.assertEqual(self.mcp._last_seen, {}, "debounce memory cleared")
