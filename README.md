@@ -93,4 +93,4 @@ agent(prompt)   # no tool call means the edit was clean; logged as "checked_clea
 | [INTEGRATION.md](docs/INTEGRATION.md) | What is live, what was verified, redeploy runbook, traps that cost time |
 | [DEMO.md](docs/DEMO.md) | The three-minute, two-laptop demo runbook |
 
-> *Skeg keeps developers smooth sailing ⛵⛵⛵⛵*
+<p align="center"><i>Skeg keeps developers smooth sailing ⛵⛵⛵⛵</i></p>
