@@ -108,7 +108,7 @@ be surprised by it in a `SELECT *`, and do not write to it.
 Why per-agent and not a boolean: `affected` is a list. A single `delivered` flag would let
 the first agent to call `/events` consume an alert on behalf of everyone else named in it,
 and `/events` is the only channel back into a running agent, so that alert would simply be
-lost. Verified: an alert affecting alice and bob is delivered to each exactly once,
+lost. Verified: an alert affecting aruneem and matthew is delivered to each exactly once,
 independently.
 
 The dashboard service is **not in `compose.yaml` yet** — that is Track D's to add. The
@@ -128,7 +128,7 @@ model runs. This is SPEC.md's "who is affected is a lookup, not a reasoning step
 
 > **Live behaviour worth knowing for the demo:** if a consumer file has **no claim**, the
 > resolver falls back to the raw file path. A real run produced
-> `affected: ["frontend/src/api/client.ts", "bob"]` — bob was notified because he had claimed
+> `affected: ["frontend/src/api/client.ts", "matthew"]` — matthew was notified because of the claim on
 > `UserCard.tsx`; `client.ts` had no claimant so its path came through instead, and no agent
 > matches a path. Have the demo agents call `declare_intent` first and this does not bite.
 
@@ -318,11 +318,11 @@ POST (not a fixture) removing `email` from `backend/api/users.py`, judged by the
 Akamai `hackathon-chat` model:
 
 ```
-(13, alice, edit,      {"file": "backend/api/users.py", "diff": "... -\"email\": user.email, ..."})
+(13, aruneem, edit,      {"file": "backend/api/users.py", "diff": "... -\"email\": user.email, ..."})
 (14, coordinator, alert, {"summary": "The GET /users/{id} response no longer includes the required \"email\" field...",
-                          "affected": ["frontend/src/api/client.ts", "bob"], "suggested_fix": "Restore the \"email\": user.email entry..."})
+                          "affected": ["frontend/src/api/client.ts", "matthew"], "suggested_fix": "Restore the \"email\": user.email entry..."})
 ```
 
-Correct on every count: `client.ts` has no claim so it fell back to its path, `bob` resolved
-from his claim on `UserCard.tsx`, and the model correctly caught the break. `main`@`8670226`
+Correct on every count: `client.ts` has no claim so it fell back to its path, `matthew` resolved
+from the claim on `UserCard.tsx`, and the model correctly caught the break. `main`@`8670226`
 is confirmed working end to end on the live server, not just on a branch or a local fixture.

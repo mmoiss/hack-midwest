@@ -27,7 +27,7 @@ mcp = FastMCP("TeamAgentCoordinator")
 # falls back to the working directory for local runs. See compose.yaml.
 DB_PATH = os.environ.get("DB_PATH", "coordinator.db")
 
-# token -> {"name": ..., "color": ...}, e.g. TEAM_TOKENS='{"tok_abc": {"name": "alice", "color": "#e06c75"}}'
+# token -> {"name": ..., "color": ...}, e.g. TEAM_TOKENS='{"tok_abc": {"name": "aruneem", "color": "#e06c75"}}'
 TEAM_TOKENS: dict = json.loads(os.environ.get("TEAM_TOKENS", "{}"))
 
 # A burst of saves to one file should cost one coordinator call, not one per save.

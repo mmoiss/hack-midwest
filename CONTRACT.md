@@ -102,7 +102,7 @@ GET  /api/whoami   -> 200 { "name": str, "color": str }      who this token is
 POST /api/reset    -> 200 { "reset": true, "by": str, ... }  back to the demo's starting state
 ```
 
-`/api/reset` rewrites `spec` to the seed's two contracts (undoing any accepted proposal), deletes every `claims` and `events` row, re-inserts the two demo claims (`backend/seed.py` `DEMO_CLAIMS`: alice on the users owner file, bob on `UserCard.tsx`), and clears the coordinator's debounce memory. It is the only route that deletes anything, which is why it is not open like the decision routes: the dashboard URL is public.
+`/api/reset` rewrites `spec` to the seed's two contracts (undoing any accepted proposal), deletes every `claims` and `events` row, re-inserts the two demo claims (`backend/seed.py` `DEMO_CLAIMS`: aruneem on the users owner file, matthew on `UserCard.tsx`), and clears the coordinator's debounce memory. It is the only route that deletes anything, which is why it is not open like the decision routes: the dashboard URL is public.
 
 ## Guarantees
 

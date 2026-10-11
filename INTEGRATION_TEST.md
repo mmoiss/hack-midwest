@@ -18,13 +18,13 @@ noted (two direct `curl` calls used as precise, low-noise checks of server behav
    unmerged branch `feat/wire-coordinator-to-events`. Created a local-only branch
    (`local-integration-test`, never pushed) merging `main` + that branch. Merged clean, zero
    conflicts.
-2. **Real tokens.** `python scripts/make_tokens.py alice bob` — generated real bearer tokens
-   mapping to `alice` and `bob`, matching the two teammates in `backend/seed.py`'s demo data.
+2. **Real tokens.** `python scripts/make_tokens.py aruneem matthew` — generated real bearer tokens
+   mapping to `aruneem` and `matthew`, matching the two teammates in `backend/seed.py`'s demo data.
 3. **Seeded the DB.** `python backend/seed.py` — loads the real demo `spec`/`claims`/`events`
    rows matching `demo-repo-template`'s actual files exactly.
 4. **Started the real server**, in-process coordinator and all:
    ```
-   TEAM_TOKENS='{"tok_...":{"name":"alice",...},"tok_...":{"name":"bob",...}}' \
+   TEAM_TOKENS='{"tok_...":{"name":"aruneem",...},"tok_...":{"name":"matthew",...}}' \
    COORDINATOR_MODEL_PROVIDER=akamai AKAMAI_TEAM_KEY=... AKAMAI_BASE_URL=... AKAMAI_CHAT_MODEL=hackathon-chat \
    python -m backend.mcp
    ```
@@ -44,12 +44,12 @@ noted (two direct `curl` calls used as precise, low-noise checks of server behav
 ### 1. `backend/seed.py`'s demo narrative confuses a real agent — run `reset.sh` before any live run
 
 `seed.py` seeds rich, fictional events for a nice-looking populated dashboard, including an
-alert naming alice as affected by a scripted "Carol started editing users.py" event that never
-really happened in this session. The first time alice (real Claude Code) called `check_conflicts`
+alert naming aruneem as affected by a scripted "Sandi started editing users.py" event that never
+really happened in this session. The first time aruneem (real Claude Code) called `check_conflicts`
 for real, this **stale fictional alert surfaced as if it were live**, and the agent — correctly
 following its own instructions — refused to proceed without asking a human first:
 
-> *"Concurrent edit: Carol is already editing `backend/api/users.py`... How do you want to
+> *"Concurrent edit: Sandi is already editing `backend/api/users.py`... How do you want to
 > proceed?"*
 
 **Fix verified:** `demo-repo/scripts/reset.sh` wipes `claims`/`events` (keeps `spec`) and
@@ -67,15 +67,15 @@ Don't let the two get out of order.
 
 ### 2. The full chain works, end to end, for real — confirmed by direct DB inspection
 
-With a clean DB, ran a real headless Claude Code session as alice:
+With a clean DB, ran a real headless Claude Code session as aruneem:
 ```
-TEAM_EVENTS_URL=http://localhost:8000/events CLAUDE_TEAM_TOKEN=<alice's token> \
+TEAM_EVENTS_URL=http://localhost:8000/events CLAUDE_TEAM_TOKEN=<aruneem's token> \
 claude -p "In backend/api/users.py, remove the email field from the JSON response
 returned by get_user. Just make that one change." --dangerously-skip-permissions
 ```
 Result, read straight from the `events` table afterward:
 ```
-(17, alice, edit,  {"file": "backend/api/users.py", "diff": "... -\"email\": user.email, ..."})
+(17, aruneem, edit,  {"file": "backend/api/users.py", "diff": "... -\"email\": user.email, ..."})
 (18, coordinator, alert, {"summary": "The `email` field was removed...", "affected": [...], "suggested_fix": "Restore the \"email\": user.email..."}})
 ```
 The real `PostToolUse` hook fired, posted the real diff to the real `/events`, the deterministic
@@ -84,7 +84,7 @@ coordinator (Akamai `hackathon-chat`, temperature=0) correctly judged it as a br
 correct, well-formed alert — no fixtures, no mocks, anywhere in this path.
 
 Also confirmed: the hook's self-reported `"agent": "claude-code"` field was correctly ignored —
-the event is attributed to `alice`, resolved purely from the bearer token, exactly as
+the event is attributed to `aruneem`, resolved purely from the bearer token, exactly as
 CONTRACT.md specifies.
 
 ### 3. Claims must exist *before* the breaking edit, or the alert can't reach anyone by name — both failure and success modes verified
@@ -93,16 +93,16 @@ Right after `reset.sh` (claims wiped), the alert above came back with
 `"affected": ["frontend/src/api/client.ts", "frontend/src/components/UserCard.tsx"]` — **file
 paths, not teammate names**, because nobody had re-claimed those consumer files yet.
 
-Proved this makes the alert undeliverable with a direct check, simulating bob's hook:
+Proved this makes the alert undeliverable with a direct check, simulating matthew's hook:
 ```
-$ curl -X POST localhost:8000/events -H "Authorization: Bearer <bob's token>" \
+$ curl -X POST localhost:8000/events -H "Authorization: Bearer <matthew's token>" \
     -d '{"agent":"codex","file":"frontend/src/components/UserCard.tsx","diff":""}'
 {"alerts":[]}
 ```
 
-Then had bob (real headless Codex) actually declare intent on his file:
+Then had matthew (real headless Codex) actually declare intent on the consumer file:
 ```
-TEAM_EVENTS_URL=http://localhost:8000/events CODEX_TEAM_TOKEN=<bob's token> \
+TEAM_EVENTS_URL=http://localhost:8000/events CODEX_TEAM_TOKEN=<matthew's token> \
 codex exec "Call declare_intent for frontend/src/components/UserCard.tsx with summary
 'Render user name and email in card', then add a one-line comment..." \
   --dangerously-bypass-hook-trust --dangerously-bypass-approvals-and-sandbox
@@ -110,13 +110,13 @@ codex exec "Call declare_intent for frontend/src/components/UserCard.tsx with su
 A subsequent judgment on the still-broken contract (debounce window had passed) correctly
 resolved the claim:
 ```
-(23, coordinator, alert, {"affected": ["frontend/src/api/client.ts", "bob"], ...})
+(23, coordinator, alert, {"affected": ["frontend/src/api/client.ts", "matthew"], ...})
 ```
 And direct inspection confirmed correct, exactly-once delivery:
 ```sql
-delivered_to: ["bob"]
+delivered_to: ["matthew"]
 ```
-A follow-up `curl` simulating bob's hook again correctly returned `{"alerts":[]}` — already
+A follow-up `curl` simulating matthew's hook again correctly returned `{"alerts":[]}` — already
 delivered, not re-sent.
 
 **This is load-bearing for the actual demo script, not just a suggestion:** both agents must
@@ -153,12 +153,12 @@ only observed to be non-fatal in every case tried here.
 
 `report_edit.py` deliberately diffs against the fixed `demo-seed` git tag, not "since this
 agent's last report" (so an agent's own mid-session commits don't hide earlier changes from it).
-Side effect observed here: because both alice and bob were pointed at the *same* `demo-repo/`
+Side effect observed here: because both aruneem and matthew were pointed at the *same* `demo-repo/`
 directory (for test convenience), each one's hook run also re-reported the *other* agent's
 still-uncommitted changes, misattributed to whichever agent's hook fired:
 ```
-(22, bob, edit, {"file": "backend/api/users.py", ...})   <- this was actually alice's edit
-(30, alice, edit, {"file": "...UserCard.tsx", ...})      <- this was actually bob's edit
+(22, matthew, edit, {"file": "backend/api/users.py", ...})   <- this was actually aruneem's edit
+(30, aruneem, edit, {"file": "...UserCard.tsx", ...})      <- this was actually matthew's edit
 ```
 **This should not happen in the real demo** — `SETUP.md` already specifies one `demo-repo/` per
 presenting laptop, and each laptop's tree would only ever contain its own agent's edits relative
@@ -167,10 +167,10 @@ way, and as a concrete reason the two-laptop setup has to actually be followed, 
 
 ### 6. The clean-edit path also holds up with a real agent-authored diff, not just hand-written fixtures
 
-Had alice restore `email` and also swap `User.query.get` for `get_or_404` in the same turn
+Had aruneem restore `email` and also swap `User.query.get` for `get_or_404` in the same turn
 (a genuinely contract-compliant improvement):
 ```
-(28, alice, edit, {"diff": "... -user = User.query.get(user_id) \n +user = User.query.get_or_404(user_id) ..."})
+(28, aruneem, edit, {"diff": "... -user = User.query.get(user_id) \n +user = User.query.get_or_404(user_id) ..."})
 (29, coordinator, checked_clean, {"contract": "GET /users/{id}"})
 ```
 No false alert. Confirms the `temperature=0` fix (PR #6) holds up against a real, model-authored

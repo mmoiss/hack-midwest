@@ -78,7 +78,7 @@ switch ($Command) {
     Write-Host "demo: clone reset to demo-seed"
     $r = Api POST "/api/reset" $Token
     if (-not $r) { Fail "server reset failed. Check .env, then: .\demo.ps1 status" }
-    Write-Host "demo: server reset by $($r.by): contracts restored, events cleared, alice/bob claims in place"
+    Write-Host "demo: server reset by $($r.by): contracts restored, events cleared, aruneem/matthew claims in place"
   }
   "status" {
     $who = Api GET "/api/whoami" $Token
