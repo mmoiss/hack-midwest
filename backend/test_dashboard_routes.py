@@ -188,6 +188,26 @@ class DashboardRoutes(unittest.TestCase):
         self.assertIn('"email"', self.shape("GET /users/{id}"), "the accepted proposal from test_3 is rolled back to the seed shape")
         self.assertEqual(self.mcp._last_seen, {}, "debounce memory cleared")
 
+    def test_6_failed_judgement_logs_review_failed(self):
+        # A spec row whose JSON columns are corrupt makes judge_edit's conversion raise
+        # before any model is touched. The failure must surface as a review_failed event
+        # (CONTRACT.md's enum) rather than vanishing into the container log — and must
+        # never raise out of judge_edit, whose caller is a fire-and-forget BackgroundTask.
+        self.mcp.judge_edit(
+            "-email",
+            {"contract": "GET /users/{id}", "owner": "backend/api/users.py", "consumers": "not json", "shape": "{}"},
+            "aruneem",
+        )
+        rows = self.events("review_failed")
+        self.assertEqual(len(rows), 1)
+        _, agent, _, payload = rows[0]
+        payload = json.loads(payload)
+        self.assertEqual(agent, "coordinator")
+        self.assertEqual(payload["contract"], "GET /users/{id}")
+        self.assertEqual(payload["edited_by"], "aruneem")
+        self.assertIn("error", payload)
+        self.assertIsInstance(payload["duration_ms"], int)
+
 
 if __name__ == "__main__":
     unittest.main()

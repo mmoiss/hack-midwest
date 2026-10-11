@@ -82,10 +82,11 @@ JSON *text*; `run_coordinator` needs them parsed — it `json.dumps()` the shape
 consumers as a list. Passing a raw `sqlite3.Row` straight through would hand it a string
 where a list belongs, and the `IN (...)` query would get one placeholder per character.
 
-`judge_edit` swallows every exception from the coordinator and logs it to the container log.
-`/events` is an agent's only channel for pending alerts, so a missing key, a rate limit or a
-model outage must not turn the hook into a `500`. If the coordinator is misbehaving you will
-see it in `docker compose logs app`, not in a failed hook:
+`judge_edit` swallows every exception from the coordinator. `/events` is an agent's only
+channel for pending alerts, so a missing key, a rate limit or a model outage must not turn
+the hook into a `500`. A swallowed failure is logged twice: a `review_failed` event the
+dashboard's Feed shows (contract, who edited, the error, how long it took), and this line
+in `docker compose logs app` with the full exception repr:
 
 ```
 [coordinator] judge_edit failed on <file> (edited by <agent>): <exception>
@@ -220,10 +221,11 @@ for files that *own* a contract. Run the seed after any fresh deploy.
 enough that the package resolves transitively today. `judge_edit` wraps the whole coordinator
 call — including `from backend.coordinator import run_coordinator` — in a blanket
 `except Exception`, deliberately, so a model outage cannot turn a hook into a `500`. The side
-effect is that an `ImportError` is swallowed too, and a missing dependency looks exactly like
-a clean "no drift found" verdict: every edit passes silently, with nothing but one line in the
-container log to say otherwise. `python-dotenv` and `pydantic` are declared explicitly for
-this reason; add any future direct import the same way.
+effect is that an `ImportError` is swallowed too. It no longer passes *silently* — a swallowed
+failure now writes a `review_failed` event the dashboard's Feed shows, alongside the container
+log line — but the edit still goes unjudged, so a missing dependency still means no drift is
+ever caught. `python-dotenv` and `pydantic` are declared explicitly for this reason; add any
+future direct import the same way.
 
 ---
 

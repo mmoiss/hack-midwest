@@ -198,6 +198,7 @@ def judge_edit(diff: str, spec_entry: sqlite3.Row, agent: str) -> None:
     sqlite3.Row cannot be passed straight through: `consumers` would arrive as a string
     and get iterated one character at a time.
     """
+    started = time.monotonic()
     try:
         # Imported lazily so the server still boots when the coordinator's dependencies
         # or model configuration are absent. The tools and /events do not need it.
@@ -215,14 +216,29 @@ def judge_edit(diff: str, spec_entry: sqlite3.Row, agent: str) -> None:
         )
     except Exception as exc:
         # /events is an agent's only channel for pending alerts, so a missing API key, a
-        # rate limit or a model outage must not turn the hook into a 500. Reported to the
-        # container log rather than the events table: "checked_clean" would be a lie, and
-        # CONTRACT.md's frozen type enum has no value for "tried and could not judge".
+        # rate limit or a model outage must not turn the hook into a 500. Logged as a
+        # review_failed event (CONTRACT.md's enum) so the dashboard's Feed shows "tried
+        # and could not judge" — never "checked_clean", which would be a lie — and still
+        # printed, so the container log keeps the full exception trail.
         print(
             f"[coordinator] judge_edit failed on {spec_entry['owner']} "
             f"(edited by {agent}): {exc!r}",
             flush=True,
         )
+        try:
+            log_event(
+                "coordinator",
+                "review_failed",
+                {
+                    "contract": spec_entry["contract"],
+                    "owner": spec_entry["owner"],
+                    "edited_by": agent,
+                    "error": str(exc),
+                    "duration_ms": int((time.monotonic() - started) * 1000),
+                },
+            )
+        except Exception:
+            pass  # the print above is the fallback of last resort
 
 
 def fetch_undelivered_alerts(agent: str) -> list[dict]:
