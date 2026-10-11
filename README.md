@@ -8,9 +8,9 @@
   &nbsp;·&nbsp; <b>MCP:</b> <code>https://skeg.site/mcp</code>
 </p>
 
-# Skeg: Hack Midwest 2026
+<h1 align="center">Skeg: Hack Midwest 2026</h1>
 
-*The Captains⚓: Aruneem Bhowmick, Matthew Moisseyev, Ogochukwu Ibe-Ikechi, and Sandarika Warjri*
+<p align="center"><i>The Captains⚓: Aruneem Bhowmick, Matthew Moisseyev, Ogochukwu Ibe-Ikechi, and Sandarika Warjri</i></p>
 
 **Skeg is a live coordination dashboard for development teams using multiple coding agents, making shared API contracts, conflicting changes, and affected teammates visible before integration breaks.**
 
