@@ -8,10 +8,10 @@ on the day.
 
 | | |
 |---|---|
-| Dashboard | https://172-237-146-90.sslip.io |
-| Health | https://172-237-146-90.sslip.io/health — expect `"events": 0` at the start |
-| MCP | https://172-237-146-90.sslip.io/mcp |
-| Hook | https://172-237-146-90.sslip.io/events |
+| Dashboard | https://skeg.site |
+| Health | https://skeg.site/health — expect `"events": 0` at the start |
+| MCP | https://skeg.site/mcp |
+| Hook | https://skeg.site/events |
 
 Tokens live only in `.env` on the VM, one per teammate, keyed by name. Ask whoever owns the
 server for yours. Never put one in a tracked file.
@@ -112,7 +112,7 @@ short; it adds about a minute.
   is by design; do not save twice.
 - **Antivirus HTTPS scanning.** If `demo status` is fine but Claude Code says the MCP server
   "connection timed out (CONNECT_TIMEOUT)", the laptop's antivirus is intercepting HTTPS
-  (Norton Web Shield did this on 2026-10-11). Exclude `172-237-146-90.sslip.io` from its SSL
+  (Norton Web Shield did this on 2026-10-11). Exclude `skeg.site` from its SSL
   scanning, or see INTEGRATION.md for the SSH-tunnel workaround. Codex keeps working but logs
   `rmcp` errors; ignore those.
 - **Wifi.** Everything is on the VM. If the venue network dies, run the whole stack on the
