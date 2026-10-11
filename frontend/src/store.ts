@@ -151,11 +151,13 @@ function reduce(s: State, { type, data = {}, ts = Date.now() }: Msg): Partial<St
   return next
 }
 
-// Agents get a color from this palette in registration order; the backend's color is ignored
-// so the UI stays on one warm, tame scheme.
+// Each teammate's color is the one their token was issued with (scripts/make_tokens.py ->
+// TEAM_TOKENS -> server.ts), so the dashboard matches /api/whoami and the demo launcher.
+// The palette below is only the fallback, assigned by registration order, for an agent the
+// token table doesn't know (e.g. a local run with TEAM_TOKENS unset).
 export const PALETTE = ['#c8794a', '#7a9a6e', '#6a86a3', '#b0655c', '#8f8a5a', '#9a7b5a']
 export const agentColor = (agents: Record<string, Agent>, id: string): string =>
-  PALETTE[Object.keys(agents).indexOf(id) % PALETTE.length] ?? '#b3b0a8'
+  agents[id]?.color ?? PALETTE[Object.keys(agents).indexOf(id) % PALETTE.length] ?? '#b3b0a8'
 
 // Human-readable alert kinds. The backend raises `drift` (raise_alert) and `escalation`
 // (escalate_to_human); `collision` is reserved for the same-file conflict SPEC.md cut.

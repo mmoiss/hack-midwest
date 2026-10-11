@@ -36,15 +36,20 @@ SPEC = [
     ("GET /orders", "backend/api/orders.py", ["frontend/src/api/client.ts", "frontend/src/pages/Orders.tsx"], {"orders": "Order[]"}),
 ]
 
-# The two claims the scripted demo moment depends on: the coordinator names the teammate
-# who claimed a consumer file, so without sandi's claim the alert says "UserCard.tsx"
-# instead of "sandi". POST /api/reset (backend/mcp.py) re-establishes these;
-# `python backend/seed.py` does not, so a fresh deploy starts with no claims until agents
-# declare intent. The names must match the ones TEAM_TOKENS was generated with
-# (scripts/make_tokens.py aruneem matthew sandi ogo), or the claims resolve to nobody.
+# The whole crew's starting claims, matching the rehearsal scenario: aruneem owns the
+# users service that sandi's admin-page work will reach into, ogo holds the UserCard
+# consumer (the coordinator names the teammate who claimed a consumer file, so without
+# ogo's claim the alert says "UserCard.tsx" instead of "ogo"), and matthew builds the
+# orders page against the as-yet-unclaimed GET /orders. POST /api/reset (backend/mcp.py)
+# re-establishes these; `python backend/seed.py` does not, so a fresh deploy starts with
+# no claims until agents declare intent. The names must match the ones TEAM_TOKENS was
+# generated with (scripts/make_tokens.py aruneem matthew sandi ogo), or the claims
+# resolve to nobody.
 DEMO_CLAIMS = [
-    ("ogo", "backend/api/users.py", "Owns GET /users/{id}"),
-    ("sandi", "frontend/src/components/UserCard.tsx", "Renders user name and email"),
+    ("aruneem", "backend/api/users.py", "Owns GET /users/{id}"),
+    ("sandi", "frontend/src/pages/Admin.tsx", "Admin page: search and edit users"),
+    ("ogo", "frontend/src/components/UserCard.tsx", "Add first and last name fields to the card"),
+    ("matthew", "frontend/src/pages/Orders.tsx", "Orders page: list orders and details"),
 ]
 
 

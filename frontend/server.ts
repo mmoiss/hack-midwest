@@ -41,8 +41,9 @@ let COLORS: Record<string, string> = {}
 // `status` is derived in the browser (store.ts agentStatus) from claims, touches and open
 // alerts, and `task` is the agent's latest declare_intent summary. `tool` stays unknown:
 // the hook's `agent` field is ignored server-side on purpose (CONTRACT.md), so nothing
-// records which CLI an agent is.
-const agent = (name: string, task?: string) => ({ id: name, name, owner: name, color: COLORS[name] ?? '#a1a1aa', task })
+// records which CLI an agent is. `color` is the teammate's own token color; left out when
+// the name is unknown, so the browser falls back to its palette instead of painting gray.
+const agent = (name: string, task?: string) => ({ id: name, name, owner: name, color: COLORS[name], task })
 
 // One `events` row -> dashboard messages (see the contract in src/store.ts).
 export function translate(db: DatabaseSync, r: Row): Msg[] {
