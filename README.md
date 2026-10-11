@@ -12,7 +12,7 @@
 
 <p align="center"><i>The Captains⚓: Aruneem Bhowmick, Matthew Moisseyev, Ogochukwu Ibe-Ikechi, and Sandarika Warjri</i></p>
 
-**Skeg is a live coordination dashboard for development teams using multiple coding agents, making shared API contracts, conflicting changes, and affected teammates visible before integration breaks.**
+<p align="center"><b>Minimize drift in your agents, maximize smooth sailing for your dev team.</b></p>
 
 ## The problem
 
