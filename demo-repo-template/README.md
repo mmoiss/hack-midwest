@@ -2,6 +2,21 @@
 
 This directory is a **template**. The live, agent-facing copy lives at `demo-repo/` (sibling of this directory, at the outer repo's root), which is excluded entirely from the outer repo's git tracking because it needs to be its own independent git repository — the hook script and `reset.sh` both shell out to `git diff`/`git reset --hard` scoped to it, and that must never entangle the outer repo's own history.
 
+## The short version
+
+```bash
+cp -r demo-repo-template demo-repo && cd demo-repo
+git init -q && git add -A && git commit -q -m demo-seed && git tag demo-seed
+cp .env.example .env          # paste your token in, leave the server URLs
+./demo.sh up                  # or .\demo.ps1 up -- launches Claude Code or Codex, connected
+./demo.sh reset               # this clone and the server back to the demo start
+./demo.sh status              # who you are, server health, is the clone clean
+```
+
+`demo.sh` / `demo.ps1` read `.env`, export what the CLI and the hook need, point Codex's
+config at the server, and reset through `POST /api/reset` with your token, so nobody needs
+SSH, Docker or a local database. The rest of this file is the long version.
+
 ## One-time setup (every teammate, once, after pulling the outer repo)
 
 ```bash
@@ -76,7 +91,7 @@ this way once already, sitting in a tracked file waiting to be committed by an u
 ## Reset to the pristine demo state
 
 ```bash
-./scripts/reset.sh
+./demo.sh reset        # .\demo.ps1 reset in PowerShell; scripts/reset.sh is now a wrapper for this
 ```
 
 ## The two seeded contracts (source of truth is `coordinator.db`'s `spec` table, seeded by `backend/seed.py` — see `spec/NOTES.md` for a human-readable mirror)
