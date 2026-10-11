@@ -18,9 +18,12 @@ const DB_PATH = process.env.DB_PATH ?? fileURLToPath(new URL('../coordinator.db'
 const PORT = Number(process.env.PORT ?? 3001)
 const NP = '[NOT PROVISIONED]'
 
-// Dashboard decisions are logged under this agent name (backend/mcp.py _decider). It is a
-// person clicking a button, not a coding agent, so it never joins the crew list.
-const HIDDEN_AGENTS = new Set(['human'])
+// Event authors that are not teammates' coding agents, so they never join the crew list.
+// 'human' is a person clicking a dashboard button (backend/mcp.py _decider); 'coordinator'
+// is the reviewing Strands agent, which narrates itself through events (review_started,
+// tool calls, alerts, checked_clean) — those still reach the Feed, it just gets no crew
+// entry or agent page of its own.
+const HIDDEN_AGENTS = new Set(['human', 'coordinator'])
 
 type Row = { id: number; ts: string; agent: string; type: string; payload: string }
 type Msg = { type: string; data: any }

@@ -65,7 +65,9 @@ CREATE TABLE events (
     agent   TEXT NOT NULL,
     type    TEXT NOT NULL,        -- "edit" | "declare_intent" | "check_conflicts" | "get_spec" |
                                    -- "propose_spec_change" | "alert" | "checked_clean" |
-                                   -- "proposal_decision" | "alert_resolved"   (dashboard, see below)
+                                   -- "proposal_decision" | "alert_resolved" |  (dashboard, see below)
+                                   -- "review_started" | "tool_call_started" | "tool_call_finished" |
+                                   -- "review_failed"   (coordinator trace, see "Coordinator boundary")
     payload TEXT NOT NULL,        -- JSON, shape depends on type
     delivered_to TEXT NOT NULL DEFAULT '[]'  -- JSON list of agent names already handed this row
 );
@@ -91,7 +93,7 @@ POST /api/alerts/{id}/resolve
 | `proposal_decision` | `{proposal_id, status, entry, previous_shape?, shape?}` | on `accepted`, **rewrites `spec.shape` for `entry` to the proposal's `change`** — the one path allowed to, per the guarantees below. `change` must be JSON (it becomes the shape `judge_edit` parses); free text is refused with `422`. A proposal is decided once: a second call is `409`. |
 | `alert_resolved` | `{alert_id}` | the alert is no longer open: `/events` stops delivering it and `check_conflicts` stops reporting it. Idempotent. |
 
-Identity: the dashboard has no login (SPEC.md puts auth out of scope), so these routes are open like `/health`, and the row's `agent` is `"human"`. If a teammate's bearer token is sent, the row is attributed to them instead. The dashboard's SSE server hides `"human"` from the crew list.
+Identity: the dashboard has no login (SPEC.md puts auth out of scope), so these routes are open like `/health`, and the row's `agent` is `"human"`. If a teammate's bearer token is sent, the row is attributed to them instead. The dashboard's SSE server hides `"human"` from the crew list, just as it hides `"coordinator"`: neither is a teammate's coding agent, so neither gets a crew entry — their events still reach the Feed.
 
 Unknown id, or an id of the wrong row type, is `404`; a body without a valid `status` is `400`. Caddy routes `/api/*` to the Python service (and `/api/stream` to the dashboard); the Vite dev server proxies the same two prefixes to `localhost:8000`.
 
@@ -102,7 +104,7 @@ GET  /api/whoami   -> 200 { "name": str, "color": str }      who this token is
 POST /api/reset    -> 200 { "reset": true, "by": str, ... }  back to the demo's starting state
 ```
 
-`/api/reset` rewrites `spec` to the seed's two contracts (undoing any accepted proposal), deletes every `claims` and `events` row, re-inserts the two demo claims (`backend/seed.py` `DEMO_CLAIMS`: alice on the users owner file, bob on `UserCard.tsx`), and clears the coordinator's debounce memory. It is the only route that deletes anything, which is why it is not open like the decision routes: the dashboard URL is public.
+`/api/reset` rewrites `spec` to the seed's two contracts (undoing any accepted proposal), deletes every `claims` and `events` row, re-inserts the two demo claims (`backend/seed.py` `DEMO_CLAIMS`: aruneem on the users owner file, matthew on `UserCard.tsx`), and clears the coordinator's debounce memory. It is the only route that deletes anything, which is why it is not open like the decision routes: the dashboard URL is public.
 
 ## Guarantees
 
@@ -145,7 +147,9 @@ def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False, pe
 
 **`judge_edit` exists to convert, not to delegate.** SQLite stores `consumers` and `shape` as JSON *text*, and `run_coordinator` needs them parsed — it `json.dumps()` the shape and iterates consumers as a list. Passing a raw `sqlite3.Row` through would hand it a string where a list belongs.
 
-Neither function returns a verdict; both report by writing `events` rows (`type = "alert"` via `raise_alert`/`escalate_to_human`, else `type = "checked_clean"`). `judge_edit` swallows every exception from the coordinator and logs it to the container log: `/events` is an agent's only channel for pending alerts, so a missing key, a rate limit or a model outage must not turn the hook into a `500`.
+Neither function returns a verdict; both report by writing `events` rows (`type = "alert"` via `raise_alert`/`escalate_to_human`, else `type = "checked_clean"`, which also records the model, provider and `duration_ms`). `judge_edit` swallows every exception from the coordinator so a missing key, a rate limit or a model outage must not turn the hook into a `500` — `/events` is an agent's only channel for pending alerts. A swallowed exception is logged as a `review_failed` event (contract, owner, who edited, the error, `duration_ms`) as well as to the container log.
+
+The coordinator also narrates itself with **trace events**, written as it works and rendered on the dashboard's Feed: `review_started` when a judgement begins (`{contract, owner, model, provider}` — the live proof of which model is judging), and `tool_call_started` / `tool_call_finished` around each Strands tool call (`{tool, input | status, model, provider, elapsed_ms}`). Trace rows are narration, not state: nothing reads them back, a failure to write one never aborts the review, and only the verdict rows above carry meaning for delivery or `check_conflicts`.
 
 ## Running the server
 

@@ -24,7 +24,7 @@ from pathlib import Path
 import uvicorn
 
 ROOT = Path(__file__).resolve().parent.parent
-TOKENS = {"tok_alice": {"name": "alice", "color": "#c8794a"}, "tok_bob": {"name": "bob", "color": "#7a9a6e"}}
+TOKENS = {"tok_aruneem": {"name": "aruneem", "color": "#c8794a"}, "tok_matthew": {"name": "matthew", "color": "#7a9a6e"}}
 HOOK_TIMEOUT = 5  # hooks/report_edit.py: urlopen(req, timeout=5)
 JUDGE_SECONDS = 3  # stand-in for a 15-30 s model round trip
 
@@ -45,7 +45,7 @@ class EventsAnswersBeforeJudging(unittest.TestCase):
         os.environ["TEAM_TOKENS"] = json.dumps(TOKENS)
         runpy.run_path(str(ROOT / "backend" / "seed.py"), run_name="__main__")  # the two contracts
         conn = sqlite3.connect(cls.db)
-        conn.execute("INSERT INTO claims VALUES ('bob', 'frontend/src/components/UserCard.tsx', 'card', datetime('now'))")
+        conn.execute("INSERT INTO claims VALUES ('matthew', 'frontend/src/components/UserCard.tsx', 'card', datetime('now'))")
         conn.commit()
         conn.close()
 
@@ -88,35 +88,35 @@ class EventsAnswersBeforeJudging(unittest.TestCase):
 
         def slow_judge(diff, spec_entry, agent):
             time.sleep(JUDGE_SECONDS)
-            self.mcp.log_event("coordinator", "alert", {"summary": "email dropped", "affected": ["bob"], "suggested_fix": "restore it"})
+            self.mcp.log_event("coordinator", "alert", {"summary": "email dropped", "affected": ["matthew"], "suggested_fix": "restore it"})
             judged.set()
 
         self.mcp.judge_edit = slow_judge  # handle_events looks the name up at call time
 
-        # alice edits a contract-owning file: her hook must get an answer right away, not
+        # aruneem edits a contract-owning file: the hook must get an answer right away, not
         # after the (previously inline) judgement.
-        elapsed, alerts = self.post("tok_alice", "backend/api/users.py")
+        elapsed, alerts = self.post("tok_aruneem", "backend/api/users.py")
         self.assertLess(elapsed, 1.0, "the response waited for the judgement")
         self.assertEqual(alerts, [])
         self.assertFalse(judged.is_set(), "judgement must run after the response, not before")
 
-        # bob's hook fires while the judgement is still running: the event loop is not
-        # blocked, so he gets an answer too (empty: the alert does not exist yet).
-        elapsed, alerts = self.post("tok_bob", "frontend/src/components/UserCard.tsx")
+        # matthew's hook fires while the judgement is still running: the event loop is not
+        # blocked, so it answers too (empty: the alert does not exist yet).
+        elapsed, alerts = self.post("tok_matthew", "frontend/src/components/UserCard.tsx")
         self.assertLess(elapsed, 1.0, "another agent's hook stalled behind the judgement")
         self.assertEqual(alerts, [])
 
-        # Once the verdict lands, bob's next call carries it -- exactly once.
+        # Once the verdict lands, matthew's next call carries it -- exactly once.
         self.assertTrue(judged.wait(JUDGE_SECONDS + 5), "judgement never finished")
-        _, alerts = self.post("tok_bob", "frontend/src/components/UserCard.tsx")
+        _, alerts = self.post("tok_matthew", "frontend/src/components/UserCard.tsx")
         self.assertEqual([a["summary"] for a in alerts], ["email dropped"])
-        _, alerts = self.post("tok_bob", "frontend/src/components/UserCard.tsx")
+        _, alerts = self.post("tok_matthew", "frontend/src/components/UserCard.tsx")
         self.assertEqual(alerts, [], "delivered alerts are not repeated")
 
     def test_non_owner_files_never_schedule_a_judgement(self):
         calls: list = []
         self.mcp.judge_edit = lambda *args: calls.append(args)
-        self.post("tok_alice", "README.md")
+        self.post("tok_aruneem", "README.md")
         time.sleep(0.3)  # a background task would have run by now
         self.assertEqual(calls, [])
 

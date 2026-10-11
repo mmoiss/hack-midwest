@@ -145,13 +145,13 @@ ssh -T git@github.com    # if the clone fails, this tells you whether the key is
 ### 4.4 Write `.env`
 
 ```bash
-python3 scripts/make_tokens.py alice bob carol dave > .env
+python3 scripts/make_tokens.py aruneem matthew sandi ogo > .env
 ```
 
 The `TEAM_TOKENS=` line goes into the file; each person's token prints to the terminal.
 **Copy those off the screen** — re-running generates entirely different tokens and invalidates
 any you already handed out. Keep the names aligned with `demo-repo/scripts/reset.sh`'s
-claims (`alice`, `bob`) so the demo's lookups resolve.
+claims (`aruneem`, `matthew`) so the demo's lookups resolve.
 
 Then append the rest:
 

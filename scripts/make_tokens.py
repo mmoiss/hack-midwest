@@ -1,6 +1,6 @@
 """Generate the TEAM_TOKENS line for .env.
 
-    python scripts/make_tokens.py alice bob carol
+    python scripts/make_tokens.py aruneem matthew sandi ogo
 
 The .env line goes to stdout so it can be piped or appended; the per-person tokens go to
 stderr so they are easy to copy out and hand to each teammate individually.

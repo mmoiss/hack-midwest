@@ -125,6 +125,14 @@ export function Alerts({ limit, agentId, openOnly = false }: Filter & { openOnly
   )
 }
 
+// How long the coordinator has been (or was) at it, from its trace events' millisecond fields.
+const secs = (ms?: number) => (typeof ms === 'number' ? ` · ${(ms / 1000).toFixed(1)}s` : '')
+const PROVIDER_LABEL: Record<string, string> = { akamai: 'Akamai', bedrock: 'Bedrock', anthropic: 'Anthropic', openai: 'OpenAI', ollama: 'Ollama' }
+const onProvider = (p?: string) => (p ? ` on ${PROVIDER_LABEL[p] ?? p}` : '')
+
+// Text color per event type; the default stays the plain foreground.
+const TONE: Record<string, string> = { checked_clean: 'font-medium text-ok', review_failed: 'text-danger' }
+
 function describe(e: FeedEvent, agents: Record<string, Agent>): [string | null, string] {
   const name = (id: string) => agents[id]?.name ?? id
   const d = e.data
@@ -138,6 +146,13 @@ function describe(e: FeedEvent, agents: Record<string, Agent>): [string | null, 
     case 'alert.add': return [null, `${alertLabel(d.type)}: ${d.message}`]
     case 'alert.resolve': return [null, `${d.by ?? 'A human'} resolved alert ${d.id}`]
     case 'file.add': return [null, `New file ${d.path}`]
+    // The coordinator's trace (backend/coordinator.py, backend/mcp.py judge_edit): the
+    // Strands review narrating itself while the model thinks, then its verdict.
+    case 'review_started': return [d.agentId, `coordinator reviewing ${d.contract} with ${d.model ?? 'the model'}${onProvider(d.provider)}`]
+    case 'tool_call_started': return [d.agentId, `coordinator → ${d.tool}${secs(d.elapsed_ms)}`]
+    case 'tool_call_finished': return [d.agentId, `coordinator ← ${d.tool} ${d.status ?? 'done'}${secs(d.elapsed_ms)}`]
+    case 'checked_clean': return [d.agentId, `Contract OK${d.contract ? `: ${d.contract}` : ''} (checked by coordinator${secs(d.duration_ms)})`]
+    case 'review_failed': return [d.agentId, `coordinator review failed on ${d.contract ?? d.owner}: ${d.error ?? 'see server log'}`]
     default: return [d.agentId, `${name(d.agentId)} ${e.type}`]
   }
 }
@@ -154,8 +169,8 @@ export function Feed({ limit, agentId }: Filter) {
       {list.map(([e, who, text]) => (
           <li key={e.id} className="flex gap-2">
             <span className="shrink-0 tabular-nums text-faint">{new Date(e.ts).toLocaleTimeString()}</span>
-            <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ background: who ? agentColor(agents, who) : 'var(--line)' }} />
-            <span>{text}</span>
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ background: who && who in agents ? agentColor(agents, who) : 'var(--line)' }} />
+            <span className={TONE[e.type]}>{text}</span>
           </li>
       ))}
     </ul>

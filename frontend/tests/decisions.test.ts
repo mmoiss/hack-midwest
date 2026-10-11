@@ -20,12 +20,12 @@ function seeded() {
   `)
   db.prepare('INSERT INTO spec VALUES (?, ?, ?, ?)').run('GET /users/{id}', 'backend/api/users.py', JSON.stringify(['frontend/src/api/client.ts', 'frontend/src/components/UserCard.tsx']), SHAPE)
   const claim = db.prepare("INSERT INTO claims VALUES (?, ?, ?, datetime('now', ?))")
-  claim.run('alice', 'backend/api/users.py', 'Return first_name/last_name', '-2 minutes')
-  claim.run('bob', 'frontend/src/components/UserCard.tsx', 'Render user name in card', '-1 minutes')
-  claim.run('bob', 'frontend/src/pages/Orders.tsx', 'List orders', '+0 minutes')
+  claim.run('aruneem', 'backend/api/users.py', 'Return first_name/last_name', '-2 minutes')
+  claim.run('matthew', 'frontend/src/components/UserCard.tsx', 'Render user name in card', '-1 minutes')
+  claim.run('matthew', 'frontend/src/pages/Orders.tsx', 'List orders', '+0 minutes')
   const ev = db.prepare('INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)')
-  ev.run('alice', 'propose_spec_change', JSON.stringify({ entry: 'GET /users/{id}', change: NEW_SHAPE, reason: 'Localized greetings' })) // id 1
-  ev.run('coordinator', 'alert', JSON.stringify({ summary: 'UserCard reads name', affected: ['bob'], suggested_fix: 'Render first_name + last_name' })) // id 2
+  ev.run('aruneem', 'propose_spec_change', JSON.stringify({ entry: 'GET /users/{id}', change: NEW_SHAPE, reason: 'Localized greetings' })) // id 1
+  ev.run('coordinator', 'alert', JSON.stringify({ summary: 'UserCard reads name', affected: ['matthew'], suggested_fix: 'Render first_name + last_name' })) // id 2
   ev.run('coordinator', 'alert', JSON.stringify({ question: 'Is dropping email intended?', escalated: true })) // id 3
   return db
 }
@@ -34,10 +34,11 @@ const rows = (db: DatabaseSync) => db.prepare('SELECT * FROM events ORDER BY id'
 test('a fresh snapshot shows pending proposals, open alerts, derived task and affects', () => {
   const db = seeded()
   const snap = snapshot(db, rows(db))
-  assert.deepEqual(snap.agents.map((a) => [a.id, a.task]), [['alice', 'Return first_name/last_name'], ['bob', 'List orders'], ['coordinator', undefined]])
+  assert.deepEqual(snap.agents.map((a) => [a.id, a.task]), [['aruneem', 'Return first_name/last_name'], ['matthew', 'List orders']])
+  assert.ok(!snap.agents.some((a) => a.id === 'coordinator'), 'the coordinator reviews edits but is not a crew member')
   assert.equal(snap.proposals.length, 1)
   assert.equal(snap.proposals[0].status, undefined, 'store.ts defaults an undecided proposal to pending')
-  assert.deepEqual(snap.proposals[0].affects, ['bob'], 'whoever claimed a consumer file, minus the proposer')
+  assert.deepEqual(snap.proposals[0].affects, ['matthew'], 'whoever claimed a consumer file, minus the proposer')
   assert.deepEqual(snap.alerts.map((a) => [a.id, a.type, a.status, a.severity]), [['3', 'escalation', 'open', undefined], ['2', 'drift', 'open', undefined]])
 })
 
@@ -47,11 +48,11 @@ test('decision rows translate to proposal.update / alert.resolve and fold into t
   // decision row remembers the old one.
   db.prepare('UPDATE spec SET shape = ? WHERE contract = ?').run(NEW_SHAPE, 'GET /users/{id}')
   db.prepare('INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)').run('human', 'proposal_decision', JSON.stringify({ proposal_id: 1, status: 'accepted', entry: 'GET /users/{id}', previous_shape: SHAPE, shape: NEW_SHAPE }))
-  db.prepare('INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)').run('bob', 'alert_resolved', JSON.stringify({ alert_id: 2 }))
+  db.prepare('INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)').run('matthew', 'alert_resolved', JSON.stringify({ alert_id: 2 }))
   const all = rows(db)
 
   assert.deepEqual(translate(db, all[3]), [{ type: 'proposal.update', data: { id: '1', status: 'accepted', by: 'human', title: 'GET /users/{id}', before: SHAPE } }])
-  assert.deepEqual(translate(db, all[4]), [{ type: 'alert.resolve', data: { id: '2', by: 'bob' } }])
+  assert.deepEqual(translate(db, all[4]), [{ type: 'alert.resolve', data: { id: '2', by: 'matthew' } }])
 
   const snap = snapshot(db, all)
   assert.equal(snap.proposals[0].status, 'accepted')
@@ -68,4 +69,19 @@ test('a rejected proposal keeps its original before/after', () => {
   const snap = snapshot(db, rows(db))
   assert.equal(snap.proposals[0].status, 'rejected')
   assert.equal(snap.proposals[0].before, SHAPE)
+})
+
+test('coordinator trace rows pass through to the feed with their payloads intact', () => {
+  const db = seeded()
+  const ev = db.prepare('INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)')
+  ev.run('coordinator', 'review_started', JSON.stringify({ contract: 'GET /users/{id}', owner: 'backend/api/users.py', model: 'hackathon-chat', provider: 'akamai' }))
+  ev.run('coordinator', 'checked_clean', JSON.stringify({ contract: 'GET /users/{id}', model: 'hackathon-chat', provider: 'akamai', duration_ms: 9800 }))
+  const all = rows(db)
+
+  assert.deepEqual(translate(db, all[3]), [{ type: 'review_started', data: { agentId: 'coordinator', contract: 'GET /users/{id}', owner: 'backend/api/users.py', model: 'hackathon-chat', provider: 'akamai' } }])
+  assert.deepEqual(translate(db, all[4]), [{ type: 'checked_clean', data: { agentId: 'coordinator', contract: 'GET /users/{id}', model: 'hackathon-chat', provider: 'akamai', duration_ms: 9800 } }])
+
+  const snap = snapshot(db, all)
+  assert.deepEqual(snap.events.slice(0, 2).map((e) => e.type), ['checked_clean', 'review_started'], 'trace rows reach the feed, newest first')
+  assert.ok(!snap.agents.some((a) => a.id === 'coordinator'), 'trace rows never promote the coordinator into the crew')
 })

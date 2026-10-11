@@ -14,6 +14,7 @@ Invocation contract (proposed, confirm with Track A before relying on it):
 import json
 import os
 import sqlite3
+import time
 
 import truststore
 
@@ -105,6 +106,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
 
 def _log_event(agent_name: str, event_type: str, payload: dict) -> None:
     conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA busy_timeout=5000")  # wait out a concurrent /events write instead of failing
     _ensure_schema(conn)
     conn.execute(
         "INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)",
@@ -112,6 +114,19 @@ def _log_event(agent_name: str, event_type: str, payload: dict) -> None:
     )
     conn.commit()
     conn.close()
+
+
+def _log_trace(event_type: str, payload: dict) -> None:
+    """Log a coordinator trace row (review_started, tool_call_*). Never let it break a review.
+
+    The trace is narration for the dashboard's Feed; the verdict (alert / checked_clean)
+    is the review's actual output. A locked database or any other logging failure here
+    must not abort the model run or a tool call, so it degrades to a container-log line.
+    """
+    try:
+        _log_event("coordinator", event_type, payload)
+    except Exception as exc:
+        print(f"[coordinator] could not log {event_type}: {exc!r}", flush=True)
 
 
 def _resolve_affected_agents(consumer_files: list[str]) -> list[str]:
@@ -180,6 +195,24 @@ def escalate_to_human(question: str) -> str:
     """
     _log_event("coordinator", "alert", {"question": question, "escalated": True})
     return "Escalated to a human."
+
+
+def _model_info() -> tuple[str, str]:
+    """(provider, model id) the coordinator will use — for the dashboard's trace events.
+
+    Mirrors _build_model's env lookups (same defaults) without constructing a client,
+    so review_started can name the model (e.g. hackathon-chat on akamai) before the
+    first token is ever requested.
+    """
+    provider = os.environ.get("COORDINATOR_MODEL_PROVIDER", "akamai")
+    model = {
+        "akamai": os.environ.get("AKAMAI_CHAT_MODEL", "hackathon-chat"),
+        "bedrock": os.environ.get("BEDROCK_MODEL_ID", "global.anthropic.claude-sonnet-4-6"),
+        "anthropic": os.environ.get("ANTHROPIC_MODEL_ID", "claude-haiku-4-5-20251001"),
+        "openai": os.environ.get("OPENAI_MODEL_ID", "gpt-4o-mini"),
+        "ollama": os.environ.get("OLLAMA_MODEL_ID", "llama3.1"),
+    }.get(provider, provider)
+    return provider, model
 
 
 def _build_model():
@@ -256,21 +289,31 @@ def _build_prompt(diff: str, spec_entry: dict, affected_agents: list[str], pendi
     return prompt + f"\nDiff:\n{diff}\n"
 
 
-def _trace(event: BeforeToolCallEvent | AfterToolCallEvent, called: list[str]) -> None:
-    """Print every tool call as it happens -- proves the Strands hook wiring works.
+def _trace(event: BeforeToolCallEvent | AfterToolCallEvent, called: list[str], ctx: dict) -> None:
+    """Record every tool call as it happens -- the live proof the Strands hook wiring works.
 
-    Deliberately prints rather than writing to the events table: persisting
-    this would mean two new event `type` values ("tool_call_started" /
-    "tool_call_finished") that aren't in CONTRACT.md's frozen enum. If the
-    dashboard's trace panel wants this level of granularity, that's a
-    one-line addition here plus a CONTRACT.md amendment -- a sync with
-    whoever owns the dashboard, not something to decide unilaterally.
+    Each call writes a tool_call_started / tool_call_finished event (CONTRACT.md's enum
+    lists both) so the dashboard's Feed shows the coordinator working in real time, and
+    still prints to stdout so the container log keeps the same trace. `ctx` carries the
+    model/provider labels and the review's start time, so every row says which model is
+    thinking and how long it has been at it.
     """
+    elapsed_ms = int((time.monotonic() - ctx["started"]) * 1000)
     if isinstance(event, BeforeToolCallEvent):
         print(f"[coordinator] -> {event.tool_use['name']}({event.tool_use['input']})")
+        _log_trace(
+            "tool_call_started",
+            {"tool": event.tool_use["name"], "input": event.tool_use["input"],
+             "model": ctx["model"], "provider": ctx["provider"], "elapsed_ms": elapsed_ms},
+        )
     else:
         called.append(event.tool_use["name"])
         print(f"[coordinator] <- {event.tool_use['name']} finished ({event.result['status']})")
+        _log_trace(
+            "tool_call_finished",
+            {"tool": event.tool_use["name"], "status": event.result["status"],
+             "model": ctx["model"], "provider": ctx["provider"], "elapsed_ms": elapsed_ms},
+        )
 
 
 def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False, pending_proposal: dict | None = None) -> None:
@@ -289,8 +332,19 @@ def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False, pe
     no human has decided yet ({id, agent, change, reason}). It lets the model tell a
     deliberate change apart from drift and escalate it instead of alerting.
     """
+    provider, model = _model_info()
+    started = time.monotonic()
+    duration_ms = lambda: int((time.monotonic() - started) * 1000)  # noqa: E731
+
     affected_agents = _resolve_affected_agents(spec_entry["consumers"])
     prompt = _build_prompt(diff, spec_entry, affected_agents, pending_proposal)
+
+    # Narrate the review on the dashboard's Feed: this row appears the moment the review
+    # begins, filling the 8-18 s the model spends thinking before any verdict lands.
+    _log_trace(
+        "review_started",
+        {"contract": spec_entry["contract"], "owner": spec_entry["owner"], "model": model, "provider": provider},
+    )
 
     if structured:
         agent = Agent(model=_build_model(), system_prompt=SYSTEM_PROMPT)
@@ -309,13 +363,22 @@ def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False, pe
                 },
             )
         else:
-            _log_event("coordinator", "checked_clean", {"contract": spec_entry["contract"]})
+            _log_event(
+                "coordinator",
+                "checked_clean",
+                {"contract": spec_entry["contract"], "model": model, "provider": provider, "duration_ms": duration_ms()},
+            )
         return
 
     called: list[str] = []
     agent = Agent(model=_build_model(), tools=[raise_alert, escalate_to_human], system_prompt=SYSTEM_PROMPT)
-    agent.add_hook(lambda event: _trace(event, called), [BeforeToolCallEvent, AfterToolCallEvent])
+    trace_ctx = {"model": model, "provider": provider, "started": started}
+    agent.add_hook(lambda event: _trace(event, called, trace_ctx), [BeforeToolCallEvent, AfterToolCallEvent])
     agent(prompt)
 
     if not called:
-        _log_event("coordinator", "checked_clean", {"contract": spec_entry["contract"]})
+        _log_event(
+            "coordinator",
+            "checked_clean",
+            {"contract": spec_entry["contract"], "model": model, "provider": provider, "duration_ms": duration_ms()},
+        )

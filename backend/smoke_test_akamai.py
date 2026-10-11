@@ -67,7 +67,7 @@ def main() -> None:
             {
                 "role": "user",
                 "content": (
-                    "A function removed a field a teammate named bob depends on. "
+                    "A function removed a field a teammate named matthew depends on. "
                     "Call raise_alert about it."
                 ),
             }
