@@ -6,7 +6,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const DB_PATH = process.env.DB_PATH ?? fileURLToPath(new URL('../backend/coordinator.db', import.meta.url))
+// Must match backend/mcp.py's default exactly: that server runs as `python -m backend.mcp`
+// from the repo root, so its unset-DB_PATH default resolves to <repo-root>/coordinator.db.
+// This used to point at <repo-root>/backend/coordinator.db instead -- a different, nonexistent
+// file -- so a local run with no env vars set had the dashboard silently reading nothing while
+// the server worked fine. See issue #13.
+const DB_PATH = process.env.DB_PATH ?? fileURLToPath(new URL('../coordinator.db', import.meta.url))
 const PORT = Number(process.env.PORT ?? 3001)
 const NP = '[NOT PROVISIONED]'
 
@@ -42,9 +47,15 @@ function translate(db: DatabaseSync, r: Row): Msg[] {
       }]
     }
     case 'alert':
+      // raise_alert and escalate_to_human both log type="alert", but with different payload
+      // shapes (summary/affected/suggested_fix vs. question/escalated) -- without this branch,
+      // an escalation's `affected`/`summary`/`suggested_fix` are all undefined and it renders
+      // as a blank card. See issue #13.
       return [{
         type: 'alert.add',
-        data: { id: String(r.id), type: NP, severity: NP, agents: p.affected ?? [], files: [], message: p.summary, suggestion: p.suggested_fix },
+        data: p.escalated
+          ? { id: String(r.id), type: 'escalation', severity: NP, agents: [], files: [], message: p.question }
+          : { id: String(r.id), type: NP, severity: NP, agents: p.affected ?? [], files: [], message: p.summary, suggestion: p.suggested_fix },
       }]
     default: // check_conflicts, get_spec, checked_clean: feed only
       return [{ type: r.type, data: { agentId, ...p } }]
