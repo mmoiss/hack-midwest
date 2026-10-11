@@ -8,7 +8,7 @@
   &nbsp;·&nbsp; <b>MCP:</b> <code>https://skeg.site/mcp</code>
 </p>
 
-# Skeg — Hack Midwest 2026
+# Skeg: Hack Midwest 2026
 
 *The Captains⚓: Aruneem Bhowmick, Matthew Moisseyev, Ogochukwu Ibe-Ikechi, and Sandarika Warjri*
 
@@ -27,7 +27,7 @@ flowchart LR
     subgraph L["Each teammate's laptop"]
         A["Claude Code / Codex"] -->|"PostToolUse hook"| H["hooks/report_edit.py"]
     end
-    subgraph V["Akamai Linode — skeg.site"]
+    subgraph V["Akamai Linode (skeg.site)"]
         M["FastMCP server<br/>backend/mcp.py"]
         C["Strands coordinator<br/>backend/coordinator.py"]
         D[("SQLite · WAL")]
@@ -43,7 +43,7 @@ flowchart LR
     S -->|"/api/stream"| B["Dashboard<br/>React + React Flow"]
 ```
 
-A `PostToolUse` hook reports every edit to the FastMCP server's `/events` route, whether or not the agent chooses to call a tool. If the edited file owns a contract in the shared SQLite spec, the Strands coordinator — running on Akamai's `hackathon-chat` — judges the diff against the **agreed shape**, not the old code, and either raises an alert naming the affected teammates (`raise_alert`), escalates a deliberate change to a human (`escalate_to_human`), or logs a clean check. The React dashboard shows all of it live over Server-Sent Events; the affected agent receives the alert as plain text on its next hook call and adapts.
+A `PostToolUse` hook reports every edit to the FastMCP server's `/events` route, whether or not the agent chooses to call a tool. If the edited file owns a contract in the shared SQLite spec, the Strands coordinator, running on Akamai's `hackathon-chat`, judges the diff against the **agreed shape** (not the old code), and either raises an alert naming the affected teammates (`raise_alert`), escalates a deliberate change to a human (`escalate_to_human`), or logs a clean check. The React dashboard shows all of it live over Server-Sent Events; the affected agent receives the alert as plain text on its next hook call and adapts.
 
 ## Powered by AWS and Akamai
 
@@ -69,7 +69,7 @@ agent = Agent(model=_build_model(), tools=[raise_alert, escalate_to_human],
               system_prompt=SYSTEM_PROMPT)
 agent.add_hook(lambda event: _trace(event, called, trace_ctx),
                [BeforeToolCallEvent, AfterToolCallEvent])
-agent(prompt)   # no tool call means the edit was clean — logged as "checked_clean"
+agent(prompt)   # no tool call means the edit was clean; logged as "checked_clean"
 ```
 
 | <img src="branding/sponsors/akamai.svg" alt="Akamai" width="280"> | **Akamai: where Skeg lives and thinks**<br>Skeg runs entirely on Akamai Cloud, and its reasoning comes from Akamai inference, giving every teammate's agent one shared, always-on, secure hub to report to. |
