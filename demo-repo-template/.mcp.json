@@ -2,7 +2,7 @@
   "mcpServers": {
     "team-coordinator": {
       "type": "http",
-      "url": "http://localhost:8000/mcp",
+      "url": "${TEAM_MCP_URL}",
       "headers": {
         "Authorization": "Bearer ${CLAUDE_TEAM_TOKEN}"
       }
