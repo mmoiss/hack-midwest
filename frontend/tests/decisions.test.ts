@@ -70,3 +70,18 @@ test('a rejected proposal keeps its original before/after', () => {
   assert.equal(snap.proposals[0].status, 'rejected')
   assert.equal(snap.proposals[0].before, SHAPE)
 })
+
+test('coordinator trace rows pass through to the feed with their payloads intact', () => {
+  const db = seeded()
+  const ev = db.prepare('INSERT INTO events (agent, type, payload) VALUES (?, ?, ?)')
+  ev.run('coordinator', 'review_started', JSON.stringify({ contract: 'GET /users/{id}', owner: 'backend/api/users.py', model: 'hackathon-chat', provider: 'akamai' }))
+  ev.run('coordinator', 'checked_clean', JSON.stringify({ contract: 'GET /users/{id}', model: 'hackathon-chat', provider: 'akamai', duration_ms: 9800 }))
+  const all = rows(db)
+
+  assert.deepEqual(translate(db, all[3]), [{ type: 'review_started', data: { agentId: 'coordinator', contract: 'GET /users/{id}', owner: 'backend/api/users.py', model: 'hackathon-chat', provider: 'akamai' } }])
+  assert.deepEqual(translate(db, all[4]), [{ type: 'checked_clean', data: { agentId: 'coordinator', contract: 'GET /users/{id}', model: 'hackathon-chat', provider: 'akamai', duration_ms: 9800 } }])
+
+  const snap = snapshot(db, all)
+  assert.deepEqual(snap.events.slice(0, 2).map((e) => e.type), ['checked_clean', 'review_started'], 'trace rows reach the feed, newest first')
+  assert.ok(!snap.agents.some((a) => a.id === 'coordinator'), 'trace rows never promote the coordinator into the crew')
+})
