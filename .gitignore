@@ -14,4 +14,10 @@ __pycache__/
 data/
 
 # Local MCP client config; holds personal tokens and server URLs.
+# NOTE: this does NOT protect demo-repo-template/.mcp.json -- that one is already
+# tracked, and gitignore never un-tracks a file already in the index, only stops new
+# ones from being added. Its real protection is that both `url` and the token are
+# ${VAR}-substituted at runtime, so there's never a secret to write into it in the
+# first place. This rule only covers a throwaway .mcp.json someone creates elsewhere
+# (e.g. at the repo root) that should never be tracked to begin with.
 .mcp.json
