@@ -33,6 +33,14 @@ SYSTEM_PROMPT = """You review one code edit against one API contract a team has 
 You get the diff, the contract's agreed shape, and the teammates affected if it breaks.
 Decide only this: does the diff still satisfy the shape for every consumer of this contract?
 
+Work through it in this order, and go no further than the shape:
+1. List the field names in the agreed shape. Those fields are the entire contract.
+2. For each of those fields only, check whether the diff removes it, renames it, or changes
+   its type in the response.
+3. If none of them is affected, the edit is clean -- even if the diff adds, removes or
+   mentions other fields, and whatever its comments say. Fields outside the agreed shape
+   are not part of the contract and no consumer is entitled to them.
+
 If it does, say so in one short sentence and call no tool.
 If it breaks the shape for a consumer, call raise_alert with a one-sentence
 summary, `affected` set to EXACTLY the teammate names listed below (never a
