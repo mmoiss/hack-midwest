@@ -167,5 +167,27 @@ class DashboardRoutes(unittest.TestCase):
         self.assertEqual(self.client.post(f"/api/proposals/{pid}", json={"status": "rejected"}).status_code, 200)
 
 
+    def test_5_whoami_and_reset(self):
+        self.assertEqual(self.client.get("/api/whoami").status_code, 401)
+        self.assertEqual(self.client.get("/api/whoami", headers={"Authorization": "Bearer tok_bob"}).json(), {"name": "bob", "color": "#7a9a6e"})
+
+        self.assertEqual(self.client.post("/api/reset").status_code, 401, "reset needs a teammate token")
+        conn = sqlite3.connect(self.db)
+        self.assertGreater(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], 0, "earlier cases left rows behind")
+        conn.close()
+
+        r = self.client.post("/api/reset", headers={"Authorization": "Bearer tok_alice"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["by"], "alice")
+        self.assertEqual(r.json()["spec"], 2)
+
+        conn = sqlite3.connect(self.db)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM events").fetchone()[0], 0)
+        self.assertEqual(conn.execute("SELECT agent, file FROM claims ORDER BY agent").fetchall(), [("alice", "backend/api/users.py"), ("bob", "frontend/src/components/UserCard.tsx")])
+        conn.close()
+        self.assertIn('"email"', self.shape("GET /users/{id}"), "the accepted proposal from test_3 is rolled back to the seed shape")
+        self.assertEqual(self.mcp._last_seen, {}, "debounce memory cleared")
+
+
 if __name__ == "__main__":
     unittest.main()

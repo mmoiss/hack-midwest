@@ -36,14 +36,33 @@ SPEC = [
     ("GET /orders", "backend/api/orders.py", ["frontend/src/api/client.ts", "frontend/src/pages/Orders.tsx"], {"orders": "Order[]"}),
 ]
 
-if __name__ == "__main__":
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")  # lets the dashboard read while Python writes
+# The two claims the scripted demo moment depends on: the coordinator names the teammate
+# who claimed a consumer file, so without bob's claim the alert says "UserCard.tsx" instead
+# of "bob". POST /api/reset (backend/mcp.py) re-establishes these; `python backend/seed.py`
+# does not, so a fresh deploy starts with no claims until agents declare intent.
+DEMO_CLAIMS = [
+    ("alice", "backend/api/users.py", "Owns GET /users/{id}"),
+    ("bob", "frontend/src/components/UserCard.tsx", "Renders user name and email"),
+]
+
+
+def seed_contracts(conn: sqlite3.Connection) -> None:
+    """Wipe spec/claims/events and write the two contracts. Shared by the CLI and /api/reset."""
     conn.executescript(SCHEMA)
     conn.executemany(
         "INSERT INTO spec VALUES (?, ?, ?, ?)",
         [(c, o, json.dumps(cons), json.dumps(shape, indent=2)) for c, o, cons, shape in SPEC],
     )
+
+
+def seed_demo_claims(conn: sqlite3.Connection) -> None:
+    conn.executemany("INSERT OR REPLACE INTO claims VALUES (?, ?, ?, datetime('now'))", DEMO_CLAIMS)
+
+
+if __name__ == "__main__":
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")  # lets the dashboard read while Python writes
+    seed_contracts(conn)
     conn.commit()
     conn.close()
     print(f"Seeded {DB_PATH}: {len(SPEC)} spec rows; claims and events cleared.")
