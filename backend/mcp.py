@@ -504,6 +504,45 @@ async def handle_alert_resolve(request: Request) -> JSONResponse:
     return JSONResponse({"id": row["id"], "status": "resolved", "by": decider})
 
 
+@mcp.custom_route("/api/whoami", methods=["GET"])
+async def handle_whoami(request: Request) -> JSONResponse:
+    """Which teammate a bearer token maps to. Lets demo.sh/demo.ps1 say who you are connecting as."""
+    try:
+        name, color = resolve_identity(_bearer(request.headers.get("authorization", "")))
+    except ValueError:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    return JSONResponse({"name": name, "color": color})
+
+
+@mcp.custom_route("/api/reset", methods=["POST"])
+async def handle_reset(request: Request) -> JSONResponse:
+    """Put the server back at the demo's starting state: the two contracts with their original
+    shapes, no events, and the two demo claims (backend/seed.py DEMO_CLAIMS).
+
+    Requires a teammate's bearer token, unlike the dashboard's decision routes: this wipes
+    everything, and the dashboard URL is public. Called by `demo.sh reset` / `demo.ps1 reset`
+    in the demo repo, which also resets the laptop's clone; nobody needs SSH or Docker.
+    """
+    try:
+        name, _ = resolve_identity(_bearer(request.headers.get("authorization", "")))
+    except ValueError:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    from backend.seed import DEMO_CLAIMS, seed_contracts, seed_demo_claims  # script-style module, imported lazily
+
+    conn = get_db()
+    try:
+        seed_contracts(conn)
+        seed_demo_claims(conn)
+        conn.commit()
+        spec_count = conn.execute("SELECT COUNT(*) FROM spec").fetchone()[0]
+    finally:
+        conn.close()
+    _last_seen.clear()  # the debounce must not swallow the first edit after a reset
+    print(f"[reset] demo state reset by {name}", flush=True)
+    return JSONResponse({"reset": True, "by": name, "spec": spec_count, "claims": [[a, f] for a, f, _ in DEMO_CLAIMS]})
+
+
 @mcp.custom_route("/health", methods=["GET"])
 async def handle_health(request: Request) -> JSONResponse:
     """Unauthenticated so the deploy script can poll it and it can be opened in front of judges."""

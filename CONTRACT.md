@@ -95,6 +95,15 @@ Identity: the dashboard has no login (SPEC.md puts auth out of scope), so these 
 
 Unknown id, or an id of the wrong row type, is `404`; a body without a valid `status` is `400`. Caddy routes `/api/*` to the Python service (and `/api/stream` to the dashboard); the Vite dev server proxies the same two prefixes to `localhost:8000`.
 
+Two more routes serve the demo launcher (`demo.sh` / `demo.ps1` in the demo repo), both **requiring a teammate's bearer token**:
+
+```
+GET  /api/whoami   -> 200 { "name": str, "color": str }      who this token is
+POST /api/reset    -> 200 { "reset": true, "by": str, ... }  back to the demo's starting state
+```
+
+`/api/reset` rewrites `spec` to the seed's two contracts (undoing any accepted proposal), deletes every `claims` and `events` row, re-inserts the two demo claims (`backend/seed.py` `DEMO_CLAIMS`: alice on the users owner file, bob on `UserCard.tsx`), and clears the coordinator's debounce memory. It is the only route that deletes anything, which is why it is not open like the decision routes: the dashboard URL is public.
+
 ## Guarantees
 
 - The server never pushes to an agent mid-session. An agent only learns things on its *next* `/events` call.

@@ -262,11 +262,16 @@ curl -s https://172-237-146-90.sslip.io/health
 ```
 
 `.env` is gitignored and lives only on the VM, so a pull never disturbs it. To reset the
-demo to its starting state:
+demo to its starting state, nobody needs the VM any more: `./demo.sh reset` (or
+`.\demo.ps1 reset`) in any teammate's demo clone calls `POST /api/reset` with their token,
+which restores the contracts, clears events and re-seeds the two demo claims. The
+equivalent from the box, if you are already on it:
 
 ```bash
-docker compose exec app python backend/seed.py
+curl -s -X POST https://172-237-146-90.sslip.io/api/reset -H "Authorization: Bearer <any teammate token>"
 ```
+
+`docker compose exec app python backend/seed.py` still works but seeds the contracts only, with no claims.
 
 **Last confirmed run of this checklist: 2026-10-10, closing out #15.** The box was found
 sitting on `feat/wire-coordinator-to-events`@`bc99688` — 9 commits behind `main`, missing

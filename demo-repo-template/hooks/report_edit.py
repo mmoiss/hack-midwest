@@ -27,10 +27,15 @@ def git(*args: str) -> str:
     return result.stdout
 
 
+# Agent configuration and the demo tooling itself are not application code: demo.sh/demo.ps1
+# rewrite .codex/config.toml to point at the server, and nobody wants that on the dashboard.
+IGNORED_PREFIXES = (".codex/", ".claude/", ".mcp.json", ".env", "hooks/", "scripts/", "demo.sh", "demo.ps1")
+
+
 def changed_files() -> list[str]:
     git("add", "-A")  # stage new/renamed files so they're visible to the diff below
     out = git("diff", "--name-only", "--no-renames", BASE_REF)
-    return [line for line in out.splitlines() if line.strip()]
+    return [line for line in out.splitlines() if line.strip() and not line.startswith(IGNORED_PREFIXES)]
 
 
 def file_diff(path: str) -> str:
