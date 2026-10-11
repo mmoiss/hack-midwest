@@ -91,6 +91,12 @@ see it in `docker compose logs app`, not in a failed hook:
 [coordinator] judge_edit failed on <file> (edited by <agent>): <exception>
 ```
 
+The coordinator also narrates each review as events — `review_started` (naming the model,
+e.g. `hackathon-chat` on `akamai`), `tool_call_started`/`tool_call_finished` around each
+Strands tool call, and a `duration_ms` on `checked_clean` — so the dashboard shows the
+review happening live. These trace rows are decoration: nothing reads them back, and a
+failure to write one never aborts a review (`coordinator.py _log_trace`).
+
 ### Track D — the dashboard
 
 Read the SQLite file directly, as planned. WAL mode is on and verified

@@ -65,7 +65,9 @@ CREATE TABLE events (
     agent   TEXT NOT NULL,
     type    TEXT NOT NULL,        -- "edit" | "declare_intent" | "check_conflicts" | "get_spec" |
                                    -- "propose_spec_change" | "alert" | "checked_clean" |
-                                   -- "proposal_decision" | "alert_resolved"   (dashboard, see below)
+                                   -- "proposal_decision" | "alert_resolved" |  (dashboard, see below)
+                                   -- "review_started" | "tool_call_started" | "tool_call_finished"
+                                   --    (coordinator trace, see "Coordinator boundary")
     payload TEXT NOT NULL,        -- JSON, shape depends on type
     delivered_to TEXT NOT NULL DEFAULT '[]'  -- JSON list of agent names already handed this row
 );
@@ -145,7 +147,9 @@ def run_coordinator(diff: str, spec_entry: dict, *, structured: bool = False, pe
 
 **`judge_edit` exists to convert, not to delegate.** SQLite stores `consumers` and `shape` as JSON *text*, and `run_coordinator` needs them parsed — it `json.dumps()` the shape and iterates consumers as a list. Passing a raw `sqlite3.Row` through would hand it a string where a list belongs.
 
-Neither function returns a verdict; both report by writing `events` rows (`type = "alert"` via `raise_alert`/`escalate_to_human`, else `type = "checked_clean"`). `judge_edit` swallows every exception from the coordinator and logs it to the container log: `/events` is an agent's only channel for pending alerts, so a missing key, a rate limit or a model outage must not turn the hook into a `500`.
+Neither function returns a verdict; both report by writing `events` rows (`type = "alert"` via `raise_alert`/`escalate_to_human`, else `type = "checked_clean"`, which also records the model, provider and `duration_ms`). `judge_edit` swallows every exception from the coordinator and logs it to the container log: `/events` is an agent's only channel for pending alerts, so a missing key, a rate limit or a model outage must not turn the hook into a `500`.
+
+The coordinator also narrates itself with **trace events**, written as it works and rendered on the dashboard's Feed: `review_started` when a judgement begins (`{contract, owner, model, provider}` — the live proof of which model is judging), and `tool_call_started` / `tool_call_finished` around each Strands tool call (`{tool, input | status, model, provider, elapsed_ms}`). Trace rows are narration, not state: nothing reads them back, a failure to write one never aborts the review, and only the verdict rows above carry meaning for delivery or `check_conflicts`.
 
 ## Running the server
 
