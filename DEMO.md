@@ -45,9 +45,9 @@ connected to the server. If it says the token was rejected, fix `.env` and run
 
 ## The prompts
 
-**Laptop A, aruneem — the breaking edit:**
+**Laptop A, ogo — the breaking edit:**
 
-> You are the teammate 'aruneem'. Per CLAUDE.md, call declare_intent for backend/api/users.py
+> You are the teammate 'ogo'. Per CLAUDE.md, call declare_intent for backend/api/users.py
 > with a one-line summary, then check_conflicts for it. Then make one minimal edit: remove
 > the 'email' entry from the JSON response in get_user in backend/api/users.py. Touch no
 > other file. Finish with one sentence: what you changed and anything the coordinator told
@@ -55,9 +55,9 @@ connected to the server. If it says the token was rejected, fix `.env` and run
 
 Wait until the alert appears on the dashboard (8 to 18 seconds). Then:
 
-**Laptop B, matthew — the adaptation:**
+**Laptop B, sandi — the adaptation:**
 
-> You are the teammate 'matthew'. Per AGENTS.md, first call check_conflicts for
+> You are the teammate 'sandi'. Per AGENTS.md, first call check_conflicts for
 > frontend/src/components/UserCard.tsx and read the result. If it reports an open alert for
 > you, make one minimal edit to UserCard.tsx so the component no longer depends on the field
 > the API dropped. Do not edit any backend file. Quote any [team-coordinator] message that
@@ -68,13 +68,13 @@ registers the server as `team_coordinator` (underscore).
 
 **Optional third beat — the spec change:**
 
-> You are 'aruneem'. Call propose_spec_change with entry exactly 'GET /users/{id}', change set
+> You are 'ogo'. Call propose_spec_change with entry exactly 'GET /users/{id}', change set
 > to this exact JSON text: {"id": "int", "name": "string"} and reason 'Email is PII and no
 > longer needed'. Then re-save backend/api/users.py with the comment '# email intentionally
 > omitted' above return jsonify.
 
 The dashboard flashes "Needs your decision". Click it, then Accept. The coordinator
-escalates the edit as a human decision instead of alerting matthew, and the next edit to the file
+escalates the edit as a human decision instead of alerting sandi, and the next edit to the file
 is judged clean against the new shape.
 
 ## Reset between rehearsals
@@ -85,8 +85,8 @@ On every laptop that took part:
 ./demo.sh reset       or  .\demo.ps1 reset
 ```
 
-The first one to run it resets the server too (contracts restored, events cleared, aruneem's
-and matthew's claims back in place); the others just reset their own clone. Nobody needs SSH.
+The first one to run it resets the server too (contracts restored, events cleared, ogo's
+and sandi's claims back in place); the others just reset their own clone. Nobody needs SSH.
 Then reload the dashboard page.
 
 ## The live demo, three minutes
@@ -94,10 +94,10 @@ Then reload the dashboard page.
 1. Dashboard on the projector, already open, sidebar showing **Live**. Both agent sessions
    already launched and connected.
 2. Tell the story: two teammates, two agents, one API. About 20 seconds.
-3. Paste aruneem's prompt. The claim and edit appear on the feed as the agent works. About 25 seconds.
+3. Paste ogo's prompt. The claim and edit appear on the feed as the agent works. About 25 seconds.
 4. The banner flashes "Contract drift", the Alerts badge turns red, the map highlights the
    owner and consumers. Pause so the room sees it. About 15 seconds.
-5. Paste matthew's prompt. The agent reads the alert and fixes the card. About 40 seconds.
+5. Paste sandi's prompt. The agent reads the alert and fixes the card. About 40 seconds.
 6. Name the challenges: AWS Strands for the coordinator, Akamai for hosting and inference.
 
 About two and a half minutes in total. Skip the spec-change beat unless the story is running
@@ -107,7 +107,7 @@ short; it adds about a minute.
 
 - **Same clone on two laptops is fine; the same token on two laptops is not.** Identity is
   the token.
-- **Do not start matthew until the alert is on screen.** The verdict takes 8 to 18 seconds.
+- **Do not start sandi until the alert is on screen.** The verdict takes 8 to 18 seconds.
 - **Repeated saves to `users.py` re-raise the same alert** until a proposal is accepted. That
   is by design; do not save twice.
 - **Antivirus HTTPS scanning.** If `demo status` is fine but Claude Code says the MCP server
