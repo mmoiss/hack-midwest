@@ -172,6 +172,14 @@ reported success, the `spec` table stayed empty, and no edit ever reached the co
 a silent failure that looks like a broken coordinator. Fixed; `/health` reporting
 `"events": 0` after a seed is the tell if it ever regresses.
 
+**A changed Caddyfile is invisible to the running Caddy, and `caddy reload` says "config is
+unchanged".** `compose.yaml` bind-mounts `./Caddyfile` as a single file. `git pull` writes the
+new version as a new inode, and the container keeps the old one, so `caddy reload` re-reads the
+stale file and reports no change while the routes you just merged return 405 from the static
+file server. Cost a redeploy on 2026-10-11 (the `/api/*` block from #25). `docker compose up -d
+--force-recreate caddy` remounts the file; the certificate is in the `caddy_data` volume and is
+not reissued.
+
 **An empty `spec` table means drift can never fire.** `/events` only calls the coordinator
 for files that *own* a contract. Run the seed after any fresh deploy.
 
@@ -211,7 +219,7 @@ test: plain completion 2.9s, tool call 3.4s, 368 tokens. The structured-output f
   80/443, so there is no exposed service behind it — this is missing defence-in-depth, not an
   open door. Set the default inbound policy to DROP with ACCEPT rules for 22/80/443 to close
   it.
-- The dashboard service and its Caddy route are not deployed.
+- ~~The dashboard service and its Caddy route are not deployed.~~ Deployed with #23; redeploy steps in §6 cover its build.
 - The Cloud Firewall gap above is the only outstanding dependency-or-config risk; the
   undeclared-import problem that used to sit here is fixed — see the trap below.
 
@@ -242,7 +250,14 @@ Compare that commit against `main`'s current `HEAD` on GitHub. If they don't mat
 
 ```bash
 git pull origin <branch>
+# Dashboard: Caddy serves frontend/dist off disk, and git never touches dist. The host has
+# no Node, so build with the node image compose already pulled (writes frontend/node_modules too).
+docker run --rm -v /opt/coordinator/frontend:/app -w /app node:24 sh -c "npm ci && npm run build"
 docker compose up -d --build        # never `down -v`
+docker compose restart dashboard    # server.ts is bind-mounted; `up` does not restart an unchanged service
+# If the Caddyfile changed: recreate, do not `caddy reload` (see the trap below). Certs live in
+# the caddy_data volume and survive this.
+docker compose up -d --force-recreate caddy
 curl -s https://172-237-146-90.sslip.io/health
 ```
 
