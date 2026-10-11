@@ -13,7 +13,7 @@ time.
 ## 1. What is live right now
 
 ```
-https://172-237-146-90.sslip.io
+https://skeg.site
 ```
 
 | Path | Method | Purpose |
@@ -30,16 +30,20 @@ Running on one Linode (`g6-standard-1`, Ubuntu 24.04, Chicago `us-ord`), two con
 `app` (FastMCP + SQLite) and `caddy` (TLS). The app publishes **no ports** — Caddy reaches it
 over Docker's internal network, so port 8000 is not exposed to the internet at all.
 
-### The hostname has no DNS record
+### The hostname
 
-`172-237-146-90.sslip.io` resolves because **sslip.io reads the IP out of the name** and
-returns it. Nothing was registered and nothing propagates. It is a real public name, so
-Let's Encrypt issues a genuinely trusted certificate for it — verified, issuer
-`Let's Encrypt CN=YE2`.
+`skeg.site` is a real registered domain whose A record points at the VM
+(172.237.146.90), with a genuinely trusted Let's Encrypt certificate — verified, issuer
+`Let's Encrypt CN=YE2`. It replaced the original zero-DNS `172-237-146-90.sslip.io`
+name, which **no longer serves TLS** — Caddy only holds the skeg.site certificate now,
+so anything still pointing at the sslip.io URL fails its TLS handshake outright. Update
+any `.env` (and any pre-parameterization `.mcp.json`) that still carries it.
 
-If the VM is ever rebuilt with a different IP, the hostname changes with it: put the new
-`<ip-with-dashes>.sslip.io` in `.env` as `DOMAIN` and restart. No config file changes —
-the `Caddyfile` reads `{$DOMAIN}`.
+If the VM is ever rebuilt with a different IP, update the domain's A record — or fall
+back to the original trick: `<ip-with-dashes>.sslip.io` encodes the IP in the name and
+resolves with no DNS record or registration at all. Either way, put the hostname in
+`.env` as `DOMAIN` and restart. No config file changes — the `Caddyfile` reads
+`{$DOMAIN}`.
 
 ---
 
@@ -47,7 +51,7 @@ the `Caddyfile` reads `{$DOMAIN}`.
 
 ### Track B — hooks
 
-Point `TEAM_EVENTS_URL` at `https://172-237-146-90.sslip.io/events` and give each agent its
+Point `TEAM_EVENTS_URL` at `https://skeg.site/events` and give each agent its
 own bearer token (`CLAUDE_TEAM_TOKEN` / `CODEX_TEAM_TOKEN`). The request shape is unchanged
 from the mock:
 
@@ -189,7 +193,7 @@ the MCP server's empty `202 Accepted` for notifications into a chunked response 
 arrives; Claude Code's client waits for it. Check from the affected laptop:
 
 ```bash
-openssl s_client -connect 172-237-146-90.sslip.io:443 -servername 172-237-146-90.sslip.io </dev/null 2>/dev/null | openssl x509 -noout -issuer
+openssl s_client -connect skeg.site:443 -servername skeg.site </dev/null 2>/dev/null | openssl x509 -noout -issuer
 # healthy: issuer=C = US, O = Let's Encrypt, ...     intercepted: issuer=... Norton Web/Mail Shield ...
 ```
 
@@ -293,7 +297,7 @@ docker compose restart dashboard    # server.ts is bind-mounted; `up` does not r
 # If the Caddyfile changed: recreate, do not `caddy reload` (see the trap below). Certs live in
 # the caddy_data volume and survive this.
 docker compose up -d --force-recreate caddy
-curl -s https://172-237-146-90.sslip.io/health
+curl -s https://skeg.site/health
 ```
 
 `.env` is gitignored and lives only on the VM, so a pull never disturbs it. To reset the
@@ -303,7 +307,7 @@ which restores the contracts, clears events and re-seeds the two demo claims. Th
 equivalent from the box, if you are already on it:
 
 ```bash
-curl -s -X POST https://172-237-146-90.sslip.io/api/reset -H "Authorization: Bearer <any teammate token>"
+curl -s -X POST https://skeg.site/api/reset -H "Authorization: Bearer <any teammate token>"
 ```
 
 `docker compose exec app python backend/seed.py` still works but seeds the contracts only, with no claims.
@@ -318,7 +322,7 @@ per `CONTRACT.md` an empty `spec` table means drift can never fire. Brought curr
 git checkout main && git pull origin main   # -> 8670226
 docker compose up -d --build
 docker compose exec app python backend/seed.py
-curl -s https://172-237-146-90.sslip.io/health   # "events": 12 matched seed.py's row count at the time; it now seeds contracts only, so expect 0
+curl -s https://skeg.site/health   # "events": 12 matched seed.py's row count at the time; it now seeds contracts only, so expect 0
 ```
 
 Then re-ran the actual drift smoke test against the now-current server — a real `/events`

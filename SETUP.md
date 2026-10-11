@@ -47,7 +47,7 @@ other agent on its next hook call. So the chain below is no longer theoretical â
 and 3 are still per-machine work nobody has done on the presenting laptops.
 
 ```
-https://172-237-146-90.sslip.io/events
+https://skeg.site/events
 ```
 
 **Do not treat a clean mock-server run as a rehearsal of the actual pitch moment.** The mock
@@ -162,7 +162,9 @@ echo 'AKAMAI_TEAM_KEY=<the team-31 key>' >> .env
 cat .env
 ```
 
-`DOMAIN` needs **no DNS record**: sslip.io reads the IP out of the hostname, so
+(The production VM now uses the registered domain `skeg.site`; the sslip.io form below
+is the zero-setup fallback for a rebuilt or second VM.) `DOMAIN` needs **no DNS record**
+with sslip.io: it reads the IP out of the hostname, so
 `203.0.113.5` becomes `203-0-113-5.sslip.io` and resolves immediately. It is a real public
 name, so Let's Encrypt issues a genuinely trusted certificate for it.
 
