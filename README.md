@@ -87,6 +87,7 @@ agent(prompt)   # no tool call means the edit was clean; logged as "checked_clea
 
 | Doc | What it covers |
 |---|---|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | The in-depth tour: the Akamai MCP server, the Strands coordinator, and coding-agent integration, with diagrams |
 | [SPEC.md](docs/SPEC.md) | The master spec: scope, architecture, coordinator design, demo script |
 | [CONTRACT.md](docs/CONTRACT.md) | The frozen interfaces: MCP tools, `/events`, schema, guarantees |
 | [SETUP.md](SETUP.md) | Standing it up: laptops, tokens, the VM from scratch, the 60-second local run |
